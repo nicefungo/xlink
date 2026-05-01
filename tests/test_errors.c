@@ -192,6 +192,28 @@ static void test_max_message(void) {
     shm_destroy("/xlink_test_max");
 }
 
+static void test_serial_open_failure(void) {
+    printf("\n--- Serial backend: open failure ---\n");
+
+    /* Non-existent serial device should return NULL */
+    errno = 0;
+    xlink_channel_t* ch = xlink_open(XLINK_SERIAL, "/dev/nonexistent_serial_test", NULL);
+    CHECK(ch == NULL, "serial open(nonexistent) returns NULL");
+    CHECK(errno != 0, "serial open failure sets errno");
+
+    /* xlink_errstr(NULL) should give error message via errno */
+    const char* err = xlink_errstr(NULL);
+    CHECK(err != NULL && strlen(err) > 0, "xlink_errstr(NULL) after serial failure is non-empty");
+    printf("    errstr = '%s'\n", err);
+
+    /* Invalid baud via opt — should not crash, should fail open on device path */
+    errno = 0;
+    xlink_opt_t opt = XLINK_OPT_DEFAULT;
+    opt.serial.baud = 300;  /* invalid baud (< 1200, gets clamped to 9600) */
+    ch = xlink_open(XLINK_SERIAL, "/dev/nonexistent_serial_test:999999", &opt);
+    CHECK(ch == NULL, "serial open(invalid baud) returns NULL (device doesn't exist)");
+}
+
 static void test_wait_invalid(void) {
     printf("\n--- xlink_wait invalid arguments ---\n");
 
@@ -252,6 +274,7 @@ int main(void) {
     test_empty_message();
     test_file_write_readonly();
     test_max_message();
+    test_serial_open_failure();
     test_wait_invalid();
 
     printf("\n=== %s ===\n", failures ? "FAILED" : "ALL PASSED");

@@ -4,6 +4,61 @@ _Scratchpad for ideas, known issues, and plans beyond the current release._
 
 ---
 
+## Round 35 — 2026-05-01 20:45 CST
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL 26 + 4 new checks PASS**
+- 26 test binaries, **0 failures** (no regressions after 35 rounds)
+- Total checkpoint count: ~311+ (estimated)
+
+### Code Review — 35th round
+
+All 7 src/ + include/xlink.h + 26 test/ files reviewed. **No new bugs found.**
+
+Cross-module consistency verified:
+- All 6 backend vtable entries consistent: `.write = NULL` on all except file_backend has a pair; `.read = NULL` on all (file_backend also NULL). xlink_write()/xlink_read() fallback chains correct.
+- `frame_recv` discard paths consistent between xlink.c generic framer and tcp_backend.c
+- SHM cleanup atexit registry bounded at 64 (documented known issue, confirmed)
+- EAGAIN error path in `udp_backend_recv()` — cosmetic only, error message says "Resource temporarily unavailable" vs a cleaner "no data" (known issue #8)
+
+### New test: Serial backend open failure (4 checks)
+
+Added `test_serial_open_failure()` to `tests/test_errors.c` covering 2 previously untested error scenarios:
+1. `xlink_open(XLINK_SERIAL, "/dev/nonexistent_serial_test", NULL)` → returns NULL, errno is properly set
+2. `xlink_errstr(NULL)` after serial failure returns non-empty string via errno
+3. Serial open with invalid baud (999999) → still returns NULL (device doesn't exist, baud clamped to 9600)
+4. Serial open with bogus opt.serial.baud=300 → NULL (same device path, clamped baud is irrelevant)
+
+All 4 checks PASS. This is the first test coverage for the serial backend's .open failure paths — previously all serial tests used PTY (success path only).
+
+### Documentation improvements
+- **Updated: `docs/next-version-thoughts.md`** — this entry
+- **Updated: `tests/test_errors.c`** — serial open failure coverage
+- Integration guide (`docs/integration-guide.md`) — comprehensive, no gaps found
+- API doc (`docs/api.md`) — complete, references known-issues.md properly
+
+### Future directions (unchanged from Round 34)
+
+1. **Wildcard test discovery**: Makefile hardcodes 26 test targets. A `$(wildcard tests/test_*.c)` rule would eliminate manual additions.
+2. **xlink_read() timeout_ms on .read = NULL backends**: The fallback silently ignores timeout. Could add compile-time assert or runtime check.
+3. **SHM cleanup cap**: `MAX_CLEANUP=64` silent drop. Could warn or dynamically resize.
+4. **Cooperative test ports**: All TCP tests use hardcoded ports. A `get_available_port()` or `PORT0` env convention would prevent conflicts.
+5. **CI-style stress test run**: `make stress` (TCP + SHM) could be integrated into the test suite.
+6. **UDP NONBLOCK recv prettier error message**: Issue #8 — `recvfrom` with EAGAIN says "Resource temporarily unavailable" vs cleaner "no data".
+
+### Known items (8 items, 1 added Round 35, 1 removed)
+
+- [√] Known issue #7 (test TCP ports) — still relevant
+- [+] Known issue #8: UDP NONBLOCK recvfrom EAGAIN error message is opaque
+
+### Codebase stats (no significant change from Round 34)
+- 7 src/ + 1 include/ + 26 test files + 4 tools/
+- 0 warnings at `-Wall -Wextra -O2 -g`
+- All 26 test binaries PASS (0 failures)
+
+---
+
 ## Round 34 — 2026-05-01 08:45 CST
 
 ### Build & Test
