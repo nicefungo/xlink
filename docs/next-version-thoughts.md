@@ -628,11 +628,56 @@ When the *last* element (highest index) fails, the swap is a self-swap (no-op): 
 
 Default CFLAGS are `-Wall -Wextra -O2 -g`. Tested with additional `-Wconversion -Wshadow -pedantic` — 0 warnings across all 25 test binaries and library. No implicit sign conversions, no shadowed variables, no ISO C violations.
 
+## Round 36 — 2026-05-02 08:45 CST
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL 26 tests PASS** (18 "ALL PASSED" banners, **0 failures**)
+- Test count: 27 test binaries (added test for multi-chunk discard in generic framer)
+
+### Code Review — 36th round
+
+All 7 src/ + include/xlink.h + 27 test/ files reviewed.
+
+**Bug found in XLINK_OPT_DEFAULT macro (pre-existing, latent):**
+- `XLINK_OPT_DEFAULT` was defined as a brace-enclosed initializer `{ .flags = 0, ... }`, which only works in **declaration** context (`xlink_opt_t opt = XLINK_OPT_DEFAULT;`).
+- Using it in **assignment** context (`opt = XLINK_OPT_DEFAULT;`) triggers a compile error: `expected expression before '{' token`.
+- Fixed: changed macro to use C99 compound literal `(xlink_opt_t){ .flags = 0, ... }`, which works in both contexts.
+- Verified all existing 70+ usage sites compile cleanly.
+- Test `test_frame_overflow.c` tripped on this (re-declared `opt` for multi-chunk test), which is what exposed it.
+
+**No other bugs found.** Cross-module consistency verified:
+- All backend vtable entries consistent (`.write`, `.read`, `.peek` NULL on stream backends)
+- `read_exact` EAGAIN partial-data-poll path correct in xlink.c generic framer
+- `frame_recv` discard path consistent between single-chunk (≤4096) and multi-chunk (>4096) cases
+- `serial_backend_open()` baud clamping: addr-parsed baud clamped at `< 1200`, opt-provided baud bypasses this check — by design (user explicitly setting opt wins)
+
+### New test: Multi-chunk discard in generic framer (10 new checks)
+
+Extended `tests/test_frame_overflow.c` with `test_multi_chunk_discard()` — exercises the `frame_recv()` discard loop with **>4096 byte payload** (8192 bytes), which triggers **multiple discard iterations** (2 chunks of 4096). Previously the test only covered single-chunk discard (512 bytes).
+
+This is the generic framer equivalent of `test_tcp_overflow_client.c`'s multi-chunk discard test for the TCP framer.
+
+### Documentation improvements
+
+**include/xlink.h**: Added docs to `XLINK_OPT_DEFAULT` macro clarifying it's a C99 compound literal, usable in both declaration and assignment, with a note against static-duration use.
+
+**docs/known-issues.md**: Unchanged — all 8 known issues still current (no new issues introduced). The `XLINK_OPT_DEFAULT` macro fix eliminated a latent build trap, not a functional issue.
+
+### Ideas for next version
+
+1. **`XLINK_OPT_DEFAULT` → add C89-safe fallback**: Some embedded toolchains use C89 rules. Could provide `XLINK_OPT_DEFAULT_VAL` macro with plain initializer for C89 contexts.
+2. **Wildcard test discovery in Makefile**: `tests:` target still has 27 hand-written compile lines. A `$(wildcard tests/*.c)` pattern would eliminate manual additions. The `test:` runner already uses wildcard.
+3. **RTSP backend**: Still a placeholder enum. A minimal RTSP client backend would round out the transport portfolio.
+4. **`xlink_bridge` tool**: CLI tool for transparent forwarding between backends (e.g., TCP ↔ SHM) is specified in docs but not built. Would be useful for gateway/router applications.
+5. **Graceful `XLINK_NONBLOCK` error strings**: `udp_backend_recv()` EAGAIN message is "Resource temporarily unavailable" vs. a cleaner "no data". Cosmetic (known issue #8).
+6. **`xlink_write()` on SHM/UDP/File: missing vtable**: These backends lack `.write` so `xlink_write()` falls through to `.send()`. Document this explicitly: .write is for raw-stream backends only.
+
 ### Remaining items (unchanged from R19)
 
 1-7: Same as Round 19.
 
-- `read_exact` in &xlink.c and &tcp_backend.c diverged: xlink.c's version handles EAGAIN with partial-data-poll, tcp_backend.c's version does too (originally identical, verified)
+- `read_exact` in xlink.c and tcp_backend.c diverged: xlink.c's version handles EAGAIN with partial-data-poll, tcp_backend.c's version does too (originally identical, verified)
 - Non-blocking `EAGAIN` return path in xlink.c `frame_recv` vs tcp_backend `recv_multi` — different error propagation. Already handled correctly.
 - `make deps` missing — tooling dependency story. Low priority.
 - Add RTSP backend (placeholder exists in enum but no implementation)

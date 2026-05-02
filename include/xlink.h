@@ -55,9 +55,13 @@ typedef struct {
     };
 } xlink_opt_t;
 
-/* Default options — call before customizing */
+/* Default options — call before customizing.
+ * Macro expands to a C99 compound literal, usable in both
+ * declaration (xlink_opt_t opt = XLINK_OPT_DEFAULT;) and
+ * assignment (opt = XLINK_OPT_DEFAULT;) contexts.
+ * Do NOT use for static-duration initializers (C89 restriction). */
 #define XLINK_OPT_DEFAULT \
-    { .flags = 0, .buf_size = 0, .timeout_ms = -1, .shm = {0} }
+    (xlink_opt_t){ .flags = 0, .buf_size = 0, .timeout_ms = -1, .shm = {0} }
 
 /* ─── Channel Handle (opaque) ─────────────────────────── */
 
