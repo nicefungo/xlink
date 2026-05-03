@@ -46,6 +46,7 @@ tests: lib
 	$(CC) $(CFLAGS) $(INCS) -o bin/tests/test_tcp_zero  tests/test_tcp_zero.c  $(LIB) $(LDLIBS)
 	$(CC) $(CFLAGS) $(INCS) -o bin/tests/test_tcp_overflow_client tests/test_tcp_overflow_client.c $(LIB) $(LDLIBS)
 	$(CC) $(CFLAGS) $(INCS) -o bin/tests/test_file_nonblock tests/test_file_nonblock.c $(LIB) $(LDLIBS)
+	$(CC) $(CFLAGS) $(INCS) -o bin/tests/test_tcp_eof_mid_frame tests/test_tcp_eof_mid_frame.c $(LIB) $(LDLIBS)
 
 test: tests
 	@for t in bin/tests/*; do \

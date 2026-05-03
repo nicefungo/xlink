@@ -72,6 +72,32 @@ static int test_record_replay(void) {
     return 0;
 }
 
+static void test_file_recv_writeonly(void) {
+    printf("\n--- File backend: recv on write-only fd ---\n");
+
+    /* CREATE opens O_WRONLY, so recv should fail with EBADF */
+    xlink_opt_t opt = XLINK_OPT_DEFAULT;
+    opt.flags = XLINK_CREATE;
+
+    xlink_channel_t* w = xlink_open(XLINK_FILE, TMP_FILE, &opt);
+    CHECK(w != NULL, "file open CREATE (write-only) for recv test");
+
+    if (w) {
+        /* Recv on a write-only file should fail */
+        uint8_t buf[64];
+        size_t len = sizeof(buf);
+        int rc = xlink_recv(w, buf, &len);
+        CHECK(rc == -1, "file recv on write-only fd returns -1");
+
+        const char* err = xlink_errstr(w);
+        CHECK(err != NULL && strlen(err) > 0, "file recv error string is non-empty");
+        printf("    err: %s\n", err);
+
+        xlink_close(w);
+    }
+    unlink(TMP_FILE);
+}
+
 static void test_file_eof(void) {
     printf("\n--- File backend: read past EOF ---\n");
 
@@ -125,6 +151,7 @@ int main(void) {
     printf("=== xlink File test ===\n");
     failures += test_record_replay();
     test_file_eof();
+    test_file_recv_writeonly();
     printf("=== %s ===\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
 }

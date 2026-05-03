@@ -139,6 +139,12 @@ static int frame_recv(xlink_channel_t* ch, void* buf, size_t* len) {
                  "frame_recv: read payload: %s", strerror(errno));
         return -1;
     }
+    if ((size_t)n < payload_len) {
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "frame_recv: short payload (%zd < %u)",
+                 n, payload_len);
+        return -1;
+    }
     *len = (size_t)n;
     return 0;
 }

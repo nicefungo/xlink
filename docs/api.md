@@ -169,7 +169,10 @@ typedef struct {
     };
 } xlink_opt_t;
 
-#define XLINK_OPT_DEFAULT { .flags = 0, .buf_size = 0, .timeout_ms = -1, .shm = {0} }
+#define XLINK_OPT_DEFAULT \
+    (xlink_opt_t){ .flags = 0, .buf_size = 0, .timeout_ms = -1, .shm = {0} }
+
+> **注意：** 此宏扩展为 C99 复合字面量（compound literal），在**声明**和**赋值**语境中均可用。请不要用于 static 变量初始化（C89 限制）。
 ```
 
 ---

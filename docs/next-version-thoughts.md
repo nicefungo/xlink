@@ -673,7 +673,49 @@ This is the generic framer equivalent of `test_tcp_overflow_client.c`'s multi-ch
 5. **Graceful `XLINK_NONBLOCK` error strings**: `udp_backend_recv()` EAGAIN message is "Resource temporarily unavailable" vs. a cleaner "no data". Cosmetic (known issue #8).
 6. **`xlink_write()` on SHM/UDP/File: missing vtable**: These backends lack `.write` so `xlink_write()` falls through to `.send()`. Document this explicitly: .write is for raw-stream backends only.
 
+## Round 37 — 2026-05-03 08:45 CST
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL 28 tests PASS** (19 "ALL PASSED" banners, **0 failures**)
+- Test count: 28 test binaries (added recv-on-writeonly file test; added test_tcp_eof_mid_frame)
+
+### Code Review — 37th round
+
+All 7 src/ + include/xlink.h + 28 test/ files reviewed.
+
+**No new bugs found.** Cross-module consistency verified:
+- `file_backend_recv()` on write-only fd (O_WRONLY) → read() returns -1/EBADF correctly
+- `serial_backend_open()` path parsing with `strrchr(':')` — correct for both `/dev/ttyUSB0:115200` and paths without colon
+- `tcp_backend_open()` getaddrinfo host/port split: consistent with addr format docs
+- UDP multicast: all paths still consistent
+
+**Edge case reviewed: `file_backend_recv()` on write-only channel** — the file backend's `recv` calls `read(ch->fd, ...)` where fd was opened with O_WRONLY. On POSIX, `read()` on a write-only fd returns `-1` with `errno=EBADF`. The backend's error message is `"file read: Bad file descriptor"` — clear and correct.
+
+### New test: File recv on write-only channel (6 new checks)
+
+Added `test_file_recv_writeonly()` in `tests/test_file.c`:
+- Opens a file with XLINK_CREATE (O_WRONLY)
+- Calls `xlink_recv()` → expects -1
+- Checks error string is non-empty (verifies errbuf set correctly)
+
+This covers the **recv path on write-only file** — a complement to the existing `test_file_write_readonly()` in `test_errors.c` which tests send on read-only file.
+
+### Documentation improvements
+
+**docs/api.md**: Updated `XLINK_OPT_DEFAULT` macro documentation to show the C99 compound literal form `(xlink_opt_t){...}`, matching the actual code. Previously showed the old brace-enclosed form.
+
+**docs/known-issues.md**: Unchanged — all 8 issues still current. No new issues introduced.
+
+### Ideas for next version
+
+1. **`file_backend_recv` error message clarity**: When read() fails on write-only fd, error says "file read: Bad file descriptor". Could add a wrapper to detect O_WRONLY and give clearer message like "file: write-only fd". Low priority — EBADF is standard POSIX.
+2. **`frame_send` writev partial-advance path**: The iov pointer adjustment in `frame_send()` is an important correctness path that's hard to test (requires writev returning partial count). Could add a stress test that generates small writes and verifies no data corruption.
+3. **`read_exact` EAGAIN partial-data path**: When EAGAIN occurs mid-read, `read_exact` polls with `-1` timeout. This could theoretically hang forever if the fd never becomes readable (e.g., TCP hang). An internal timeout here could be a safety net — but would change the API contract.
+
 ### Remaining items (unchanged from R19)
+
+1-7: Same as Round 19.
 
 1-7: Same as Round 19.
 
