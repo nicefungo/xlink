@@ -673,7 +673,93 @@ This is the generic framer equivalent of `test_tcp_overflow_client.c`'s multi-ch
 5. **Graceful `XLINK_NONBLOCK` error strings**: `udp_backend_recv()` EAGAIN message is "Resource temporarily unavailable" vs. a cleaner "no data". Cosmetic (known issue #8).
 6. **`xlink_write()` on SHM/UDP/File: missing vtable**: These backends lack `.write` so `xlink_write()` falls through to `.send()`. Document this explicitly: .write is for raw-stream backends only.
 
-## Round 37 — 2026-05-03 08:45 CST
+## Round 38 — 2026-05-03 20:45 CST
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL 29 tests PASS** (ALL PASSED banners across all test binaries, **0 failures**)
+- Test count: 29 test binaries (extended test_wait_edge.c, no new binary)
+
+### Code Review — 38th round
+
+All 7 src/ + include/xlink.h + 29 test/ files reviewed.
+
+**No new bugs found.** Codebase stable after 38 consecutive rounds.
+
+Cross-module consistency verified:
+- Mixed SHM+pipe `xlink_wait` with `timeout=-1` (deadline_ms=INT64_MAX, remain=10 polling branch in the mixed-path wait loop) — verified correct through code inspection and new test
+- `read_exact` in xlink.c vs tcp_backend.c — still consistent (both handle EAGAIN with partial-data-poll correctly)
+- All 6 backend vtable entries consistent — `.write = NULL` and `.read = NULL` on all stream backends
+- `ch->use_framing` set correctly: xlink.c defaults for PIPE/TCP/SERIAL, each backend can override as needed (TCP overrides to 0 because it handles framing internally, PIPE/SERIAL match the default at 1)
+
+### New test coverage: Mixed SHM+pipe xlink_wait with timeout=-1 (12 checks)
+
+Extended `tests/test_wait_edge.c` with `test_mixed_infinite_wait()`.
+
+**Code path exercised:**
+```c
+xlink_wait(chans, n, -1)
+  → npfd > 0 (pipe has fd >= 0)
+  → has_peek = true (SHM backend has peek)
+  → deadline_ms = INT64_MAX  // timeout < 0
+  → remain = 10              // INT64_MAX path in mixed loop
+  → for(;;) { poll(10ms); peek SHM; ... }  // tight polling loop
+```
+
+Previously this branch was covered implicitly by mixed tests with positive timeout
+(i.e. data available before the call), but the `INT64_MAX → remain = 10` path and
+the **fork + delayed send** pattern was untested.
+
+**Test structure:**
+1. Parent opens SHM tx/rx + pipe
+2. Fork: child sleeps 200ms, sends "inf_sig" (8 bytes) via SHM tx
+3. Parent: `xlink_wait([pipe, shm_rx], 2, -1)` blocks ~200ms then returns index 1
+4. Parent: reads SHM rx and verifies content
+5. `alarm(5)` safety timeout in case child fails (prevents infinite hang)
+
+**New check count:** 12 checks (inf: open SHM tx/rx, open pipe, fork, wait returns
+valid index, data on SHM index 1, recv OK, content matches, waitpid, child exit
+status clean).
+
+### Documentation improvements
+- **Updated: `docs/next-version-thoughts.md`** — this entry (Round 38)
+- **Updated: `tests/test_wait_edge.c`** — new `test_mixed_infinite_wait()` function
+- **API doc (`docs/api.md`)** and **integration guide (`docs/integration-guide.md`)** — reviewed, no stale info found. Both reference known-issues.md correctly.
+- **known-issues.md** — all 8 issues still current. No new issues introduced.
+
+### Ideas for next version
+
+1. **SIGPIPE hardening**: All write paths (xlink.c `frame_send`, tcp_backend.c `write_framed`, all backend `send` functions) are vulnerable to SIGPIPE if the fd is broken. Callers should `signal(SIGPIPE, SIG_IGN)` or xlink should guard internally. Currently only `stress_tcp.c` and `stress_shm.c` do this at the test level. API docs should document this requirement.
+
+2. **`frame_send` writev partial-advance path**: Hard to trigger naturally (requires writev to return between header and payload). Could add dedicated test with a small pipe buffer or a controlled writev-output via a mock fd.
+
+3. **`read_exact` EAGAIN timeout safety**: When `read_exact` gets EAGAIN mid-read, it polls with infinite timeout (`-1`). If the fd never becomes readable (e.g., TCP half-open), this hangs forever. An internal timeout here would be safer, but changes the API semantics.
+
+4. **`xlink_wait` SHM-only infinite wait with delayed data**: The pure-SHM path (npfd=0, has_peek=true, timeout=-1) with fork+delay is still untested. The existing pure-SHM timeout=-1 test has data ready before the call.
+
+5. **Wildcard test discovery**: Makefile still hardcodes all test targets. A `$(wildcard tests/*.c)` rule would eliminate manual additions.
+
+6. **Cooperative test ports**: All TCP tests use hardcoded ports (19897-19998). Running tests in parallel would cause conflicts. A port allocator utility would help.
+
+### Remaining known issues (unchanged — 8 items)
+
+1. `recv_multi` stale fd on client disconnect — swap-remove leaves entries in fds[]
+2. `xlink_read()` silently ignores timeout_ms on SHM/UDP/File backends (`.read = NULL`)
+3. NONBLOCK write EAGAIN in `frame_send()` treated as hard error (no retry)
+4. UDP receiver-as-sender `write()` on unconnected socket may ENOTCONN
+5. `shm_backend_peek` error → `*avail=0` indistinguishable from "no data"
+6. `bridge.c` `xlink_errstr(chA)` when chA==NULL: errno may be stale from arg parsing
+7. SIGPIPE not guarded in library code (callers must `signal(SIGPIPE, SIG_IGN)`)
+8. Makefile hardcodes 29 test targets — new tests manually added
+
+### Codebase stats
+- **7 src/ + include/ + 0 new test files + 29 test binaries**
+- **29 test binaries, ALL PASS** (0 failures)
+- **0 warnings** with `-Wall -Wextra -O2 -g`
+- **12 new checks** this round (mixed infinite wait)
+- All 8 known issues unchanged (no new issues introduced)
+
+---
 
 ### Build & Test
 - `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)

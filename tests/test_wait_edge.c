@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <errno.h>
+#include <sys/wait.h>
 
 static int failures = 0;
 #define CHECK(cond, msg) do {                                    \
@@ -431,6 +432,87 @@ static void test_pure_shm_poll_once(void) {
     shm_destroy("/xlink_wait_pure_2");
 }
 
+static void test_mixed_infinite_wait(void) {
+    fprintf(stderr, "\n--- Mixed SHM+pipe infinite wait (timeout=-1, "
+                    "deadline_ms=INT64_MAX) ---\n");
+
+    shm_destroy(SHM_NAME);
+    unlink(PIPE_PATH);
+
+    /* Create SHM sender (needs CREATE) */
+    xlink_opt_t create_opt = XLINK_OPT_DEFAULT;
+    create_opt.flags = XLINK_CREATE;
+    xlink_channel_t* shm_tx = xlink_open(XLINK_SHM, SHM_NAME, &create_opt);
+    CHECK(shm_tx != NULL, "inf: open SHM tx");
+
+    /* Create SHM receiver */
+    xlink_channel_t* shm_rx = xlink_open(XLINK_SHM, SHM_NAME, NULL);
+    CHECK(shm_rx != NULL, "inf: open SHM rx");
+
+    /* Create pipe */
+    xlink_opt_t pipe_opt = XLINK_OPT_DEFAULT;
+    pipe_opt.flags = XLINK_CREATE;
+    xlink_channel_t* pipe = xlink_open(XLINK_PIPE, PIPE_PATH, &pipe_opt);
+    CHECK(pipe != NULL, "inf: open pipe");
+
+    if (!shm_tx || !shm_rx || !pipe) {
+        if (shm_tx) xlink_close(shm_tx);
+        if (shm_rx) xlink_close(shm_rx);
+        if (pipe) xlink_close(pipe);
+        shm_destroy(SHM_NAME);
+        unlink(PIPE_PATH);
+        return;
+    }
+
+    /* Fork: child sends SHM data after 200ms delay.
+     * Parent does xlink_wait with timeout=-1 (infinite).
+     *
+     * This exercises the mixed-path loop where:
+     *   npfd > 0     → pipe has fd >= 0
+     *   has_peek     → SHM backend has peek
+     *   timeout=-1   → deadline_ms = INT64_MAX → remain = 10
+     * The loop polls(10ms) + peeks until data arrives on SHM. */
+    pid_t pid = fork();
+    CHECK(pid >= 0, "inf: fork");
+
+    if (pid == 0) {
+        /* Child: sleep, send data, exit */
+        usleep(200000);
+        int rc = xlink_send(shm_tx, "inf_sig", 8);
+        if (rc != 0) _exit(1);
+        _exit(0);
+    }
+
+    /* Parent: alarm kills test if child fails */
+    alarm(5);
+    xlink_channel_t* chans[2] = { pipe, shm_rx };
+    int ready = xlink_wait(chans, 2, -1);
+    alarm(0);
+    CHECK(ready >= 0, "inf: wait(-1) returns ready index");
+    CHECK(ready == 1, "inf: data on SHM (index 1)");
+
+    if (ready == 1) {
+        uint8_t buf[128];
+        size_t len = sizeof(buf);
+        int rc = xlink_recv(shm_rx, buf, &len);
+        CHECK(rc == 0, "inf: recv OK");
+        CHECK(len == 8 && memcmp(buf, "inf_sig", 8) == 0,
+              "inf: data content 'inf_sig'");
+    }
+
+    /* Wait for child and collect status */
+    int status;
+    CHECK(waitpid(pid, &status, 0) == pid, "inf: waitpid");
+    CHECK(WIFEXITED(status), "inf: child exited normally");
+    CHECK(WEXITSTATUS(status) == 0, "inf: child exit status 0");
+
+    xlink_close(shm_tx);
+    xlink_close(shm_rx);
+    xlink_close(pipe);
+    shm_destroy(SHM_NAME);
+    unlink(PIPE_PATH);
+}
+
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
 
@@ -440,6 +522,7 @@ int main(void) {
     test_poll_once();
     test_mixed_shm_pipe();
     test_mixed_shm_pipe_poll_once();
+    test_mixed_infinite_wait();
     test_pure_shm_wait();
     test_pure_shm_poll_once();
 
