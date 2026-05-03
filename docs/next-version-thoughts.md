@@ -717,8 +717,6 @@ This covers the **recv path on write-only file** — a complement to the existin
 
 1-7: Same as Round 19.
 
-1-7: Same as Round 19.
-
 - `read_exact` in xlink.c and tcp_backend.c diverged: xlink.c's version handles EAGAIN with partial-data-poll, tcp_backend.c's version does too (originally identical, verified)
 - Non-blocking `EAGAIN` return path in xlink.c `frame_recv` vs tcp_backend `recv_multi` — different error propagation. Already handled correctly.
 - `make deps` missing — tooling dependency story. Low priority.
