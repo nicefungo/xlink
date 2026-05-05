@@ -85,11 +85,14 @@ the remote device. Always specify a known baud rate (4800, 9600, 19200, 38400,
 
 ## 7. Makefile hardcodes test targets — new tests manually added
 
-**Status**: Minor (maintenance overhead)
+**Status**: ✅ Fixed in `99f560d`
 
-**Description**: Adding a new test requires editing the Makefile. A wildcard
-scan (`bin/tests/*.c`?) would be more maintainable but was deferred for
-explicit control over build dependencies.
+**Fix**: Replaced hardcoded test compilation lines with a wildcard pattern:
+```makefile
+TEST_SRCS = $(wildcard tests/test_*.c)
+TEST_BINS = $(patsubst tests/%.c, bin/tests/%, $(TEST_SRCS))
+```
+New `test_*.c` files are auto-discovered. No Makefile edits needed.
 
 ## 8. UDP NONBLOCK recv: recvfrom() with EAGAIN returns -1 without errbuf message
 
