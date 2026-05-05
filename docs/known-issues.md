@@ -26,16 +26,12 @@ with `xlink_wait()` for timed receive on those backends.
 
 ## 2. SHM atexit cleanup has a fixed 64-entry cap
 
-**Status**: Minor (potential leak in aggressive multi-SHM use)
+**Status**: ✅ Fixed in `0d13a4d`
 
-**Affected code**: `src/xlink.c` — `shm_cleanup_all()` / `MAX_CLEANUP`
-
-**Description**: The SHM cleanup registry limits cleanup to 64 names. If a
-process creates >64 SHM segments with `XLINK_CREATE`, the extras are silently
-dropped and will leak if `atexit` is the only cleanup path.
-
-**Workaround**: Limit per-process SHM usage to ≤64 named segments. Or use
-explicit `shm_destroy()` for segments beyond the 64th.
+**Fix**: `MAX_CLEANUP` bumped from 64 to 256 (2KB BSS). Processes creating up
+to 256 SHM segments with `XLINK_CREATE` are fully tracked for atexit cleanup.
+Still have the cap — beyond 256 leaks, but that requires extremely aggressive
+SHM usage.
 
 ## 3. TCP NONBLOCK + oversized message discard on pipe backend (same code in xlink.c)
 
