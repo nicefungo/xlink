@@ -309,9 +309,18 @@ static int try_reconnect(tcp_priv_t* p, xlink_channel_t* ch) {
  *   - If partial data consumed → poll() and retry (prevents framing desync
  *     when a message header is split across multiple read() calls)
  * Returns 0 on success, -1 on error (errno preserved). */
+#include <time.h>
+
+static int64_t now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
+}
+
 static int read_exact(int fd, void* buf, size_t n) {
     uint8_t* p = (uint8_t*)buf;
     size_t remaining = n;
+    int64_t deadline = now_ms() + 30000;  /* 30s internal timeout */
     while (remaining > 0) {
         ssize_t nr;
         do { nr = read(fd, p, remaining); } while (nr < 0 && errno == EINTR);
@@ -320,8 +329,16 @@ static int read_exact(int fd, void* buf, size_t n) {
                 /* Partial data consumed — poll for more instead of returning
                  * partial, which would desync the framer on the next call. */
                 struct pollfd pfd = { .fd = fd, .events = POLLIN };
+                int64_t now = now_ms();
+                if (now >= deadline) {
+                    errno = ETIMEDOUT;
+                    return -1;
+                }
+                int poll_ms = (int)(deadline - now);
+                if (poll_ms > 1000) poll_ms = 1000;
                 int prc;
-                do { prc = poll(&pfd, 1, -1); } while (prc < 0 && errno == EINTR);
+                do { prc = poll(&pfd, 1, poll_ms); } while (prc < 0 && errno == EINTR);
+                if (prc == 0) continue;   /* poll timed out — recheck deadline */
                 if (prc <= 0) return -1;
                 continue;  /* retry the read */
             }
