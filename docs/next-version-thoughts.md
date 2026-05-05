@@ -4,6 +4,58 @@ _Scratchpad for ideas, known issues, and plans beyond the current release._
 
 ---
 
+## Round 43 — 2026-05-05 14:47 CST
+
+### Documentation — P0 short-term plan document
+
+Added `docs/future-plans/06-p0-short-term.md` with detailed design for all 3 P0 items:
+1. **TCP xlink_errstr** — 6 lines of errbuf snprintf in write_framed/read_framed fail paths
+2. **read_exact internal timeout** — 30s deadline for half-open TCP hang protection
+3. **NONBLOCK EAGAIN retry** — writev EAGAIN retry up to 100x with POLLOUT wait
+
+Updated `docs/future-plans/index.md` to reference the new document.
+
+Total future-plans/: 7 files, 2 directories (including archive/).
+
+---
+
+## Round 42 — 2026-05-05 13:48 CST
+
+### Documentation — future-plans/ directory created
+
+Created `/home/admin/xlink/docs/future-plans/` with 6 documents (617 lines total):
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `index.md` | 75 | 路线图总览 + 优先级排序 + 依赖关系图 + 决策日志 |
+| `01-plugins-arch.md` | 92 | 插件化架构设计（动态后端加载） |
+| `02-async-io.md` | 112 | 异步 I/O（io_uring / epoll） |
+| `03-tls-security.md` | 114 | TLS 加密通信层（OpenSSL / WolfSSL） |
+| `04-performance.md` | 112 | 性能优化（Zero-Copy、批量化） |
+| `05-multi-platform.md` | 112 | 跨平台支持（Windows / macOS / FreeRTOS） |
+
+Each document follows the standard template: 动机 → 设计方案 → 实现路径（3 Phase） → 依赖 → 开放问题 → 关联文档.
+
+P0 items for immediate next version prioritised:
+1. TCP error paths → xlink_errstr
+2. read_exact internal timeout
+3. NONBLOCK TCP EAGAIN retry
+
+### Ideas for next version (updated)
+- [MOVED TO future-plans/] Plugin architecture → `01-plugins-arch.md`
+- [MOVED TO future-plans/] Async I/O (io_uring) → `02-async-io.md`
+- [MOVED TO future-plans/] TLS security → `03-tls-security.md`
+- [MOVED TO future-plans/] Performance (zero-copy, batching) → `04-performance.md`
+- [MOVED TO future-plans/] Cross-platform support → `05-multi-platform.md`
+- Remaining short-term items (P0) kept inline:
+  - `xlink_errstr` to TCP error paths
+  - `read_exact` internal timeout
+  - NONBLOCK TCP send EAGAIN retry
+  - Wildcard test discovery in Makefile
+  - UDP NONBLOCK recv error message (cosmetic)
+
+---
+
 ## Round 41 — 2026-05-05 08:45 CST
 
 ### Build & Test
