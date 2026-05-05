@@ -93,13 +93,8 @@ explicit control over build dependencies.
 
 ## 8. UDP NONBLOCK recv: recvfrom() with EAGAIN returns -1 without errbuf message
 
-**Status**: Minor
+**Status**: ✅ Fixed in `4e04816`
 
-**Affected code**: `src/udp_backend.c` — `udp_backend_recv()`
-
-**Description**: When `XLINK_NONBLOCK` is set on a UDP receiver and no datagram
-is available, `recvfrom()` returns -1 with `errno = EAGAIN`. The error buffer
-message says "udp recvfrom: Resource temporarily unavailable", which could be
-confusing. An explicit "no data" message would be clearer.
-
-This is a cosmetic issue — the API contract (return -1 when no data) is correct.
+**Fix**: `udp_backend_recv()` now sets errbuf to `"udp: no data"` instead of
+`"udp recvfrom: Resource temporarily unavailable"` when `recvfrom()` returns
+`EAGAIN` or `EWOULDBLOCK`.
