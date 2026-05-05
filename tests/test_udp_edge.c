@@ -52,6 +52,72 @@ static int raw_udp_send(int port, const void* data, size_t len) {
     return (n >= 0) ? 0 : -1;
 }
 
+static int test_udp_receiver_send_fails(void) {
+    printf("\n--- UDP receiver: xlink_send on receiver-only channel ---\n");
+
+    /* Open a UDP receiver (":port" address → is_receiver=1, dest_len=0).
+     * Calling xlink_send() should go through the write() fallback path,
+     * which on an unconnected DGRAM socket returns -1 with EDESTADDRREQ. */
+    int port = 19988;
+    char addr[32];
+    snprintf(addr, sizeof(addr), ":%d", port);
+
+    xlink_opt_t opt = XLINK_OPT_DEFAULT;
+    xlink_channel_t* ch = xlink_open(XLINK_UDP, addr, &opt);
+    CHECK(ch != NULL, "UDP receiver open for send test");
+
+    if (!ch) return 1;
+
+    /* Attempt to send on receiver-only channel — should fail */
+    const char* msg = "send on receiver should fail";
+    int rc = xlink_send(ch, msg, strlen(msg) + 1);
+    CHECK(rc == -1, "xlink_send on UDP receiver returns -1");
+
+    /* errbuf should indicate the failure reason */
+    const char* err = xlink_errstr(ch);
+    CHECK(err != NULL, "errstr is non-NULL after receiver send failure");
+    if (err) {
+        CHECK(strstr(err, "udp write") != NULL,
+              "errstr contains 'udp write'");
+        CHECK(strlen(err) > 0, "errstr is non-empty");
+        printf("    err: %s\n", err);
+    }
+
+    /* Verify the receiver still works for its intended purpose */
+    const char* normal_msg = "normal recv test";
+    {
+        int raw_fd = socket(AF_INET6, SOCK_DGRAM, 0);
+        if (raw_fd >= 0) {
+            int no = 0;
+            setsockopt(raw_fd, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(no));
+            struct sockaddr_in6 sin6;
+            memset(&sin6, 0, sizeof(sin6));
+            sin6.sin6_family = AF_INET6;
+            sin6.sin6_port   = htons((uint16_t)port);
+            sin6.sin6_addr.s6_addr[10] = 0xff;
+            sin6.sin6_addr.s6_addr[11] = 0xff;
+            sin6.sin6_addr.s6_addr[12] = 127;
+            sin6.sin6_addr.s6_addr[15] = 1;
+            sendto(raw_fd, normal_msg, strlen(normal_msg) + 1, 0,
+                   (struct sockaddr*)&sin6, sizeof(sin6));
+            close(raw_fd);
+        }
+
+        uint8_t buf[256];
+        size_t len = sizeof(buf);
+        rc = xlink_recv(ch, buf, &len);
+        CHECK(rc == 0, "UDP receiver still works after failed send");
+        if (rc == 0) {
+            CHECK(len == strlen(normal_msg) + 1 &&
+                  memcmp(buf, normal_msg, len) == 0,
+                  "received content matches");
+        }
+    }
+
+    xlink_close(ch);
+    return 0;
+}
+
 static int test_udp_nonblock_eagain(void) {
     printf("\n--- UDP NONBLOCK recv EAGAIN path ---\n");
 
@@ -141,6 +207,7 @@ static int test_create_receiver(void) {
 int main(void) {
     printf("=== xlink UDP edge case tests ===\n");
     test_create_receiver();
+    test_udp_receiver_send_fails();
     test_udp_nonblock_eagain();
     printf("\n=== %s ===\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;

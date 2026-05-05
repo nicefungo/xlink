@@ -192,6 +192,41 @@ static void test_max_message(void) {
     shm_destroy("/xlink_test_max");
 }
 
+static void test_tcp_server_send_no_clients(void) {
+    printf("\n--- TCP server: send with no connected clients ---\n");
+
+    /* Open TCP server on an ephemeral port, but don't connect any clients.
+     * send_to_all() should find ok_count == 0 and return -1. */
+    const char* addr = ":19999";
+
+    xlink_opt_t opt = XLINK_OPT_DEFAULT;
+    opt.flags = XLINK_SERVER;
+
+    xlink_channel_t* ch = xlink_open(XLINK_TCP, addr, &opt);
+    CHECK(ch != NULL, "open TCP server on :19999");
+
+    if (ch) {
+        /* Send despite no clients → should fail */
+        const char* msg = "hello?";
+        int rc = xlink_send(ch, msg, strlen(msg) + 1);
+        CHECK(rc == -1, "tcp server send with no clients returns -1");
+
+        /* errbuf should contain "no connected clients" message */
+        const char* err = xlink_errstr(ch);
+        CHECK(err != NULL, "errstr is non-NULL");
+        if (err) {
+            CHECK(strstr(err, "no connected clients") != NULL,
+                  "errstr contains 'no connected clients'");
+            printf("    err: %s\n", err);
+        }
+
+        xlink_close(ch);
+    }
+
+    /* Wait briefly for listen socket to release before next test */
+    usleep(50000);
+}
+
 static void test_serial_open_failure(void) {
     printf("\n--- Serial backend: open failure ---\n");
 
@@ -274,6 +309,7 @@ int main(void) {
     test_empty_message();
     test_file_write_readonly();
     test_max_message();
+    test_tcp_server_send_no_clients();
     test_serial_open_failure();
     test_wait_invalid();
 

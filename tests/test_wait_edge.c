@@ -8,6 +8,7 @@
  *   4. Poll-once: timeout=0 with no data → -1
  *   5. Mixed channels: SHM + pipe → wait across poll and peek paths
  *   6. Wait for SHM after pipe (data on SHM only)
+ *   7. Pure SHM infinite wait (timeout=-1) with delayed data (fork + child)
  */
 
 #include "xlink.h"
@@ -513,6 +514,123 @@ static void test_mixed_infinite_wait(void) {
     unlink(PIPE_PATH);
 }
 
+static void test_pure_shm_infinite_wait(void) {
+    fprintf(stderr, "\n--- Pure SHM infinite wait with delayed fork "
+                    "(npfd=0, has_peek=true, timeout=-1) ---\n");
+
+    const char* name1 = "/xlink_pure_inf_1";
+    const char* name2 = "/xlink_pure_inf_2";
+    shm_destroy(name1);
+    shm_destroy(name2);
+
+    /* Create two SHM segments */
+    xlink_opt_t create_opt = XLINK_OPT_DEFAULT;
+    create_opt.flags = XLINK_CREATE;
+    xlink_channel_t* tx = xlink_open(XLINK_SHM, name1, &create_opt);
+    CHECK(tx != NULL, "pure_inf: open SHM tx");
+
+    xlink_channel_t* rx = xlink_open(XLINK_SHM, name1, NULL);
+    CHECK(rx != NULL, "pure_inf: open SHM rx");
+
+    /* Second SHM channel for 2-channel wait test */
+    xlink_channel_t* tx2 = xlink_open(XLINK_SHM, name2, &create_opt);
+    CHECK(tx2 != NULL, "pure_inf: open SHM tx2");
+
+    xlink_channel_t* rx2 = xlink_open(XLINK_SHM, name2, NULL);
+    CHECK(rx2 != NULL, "pure_inf: open SHM rx2");
+
+    if (!tx || !rx || !tx2 || !rx2) {
+        if (tx) xlink_close(tx);
+        if (rx) xlink_close(rx);
+        if (tx2) xlink_close(tx2);
+        if (rx2) xlink_close(rx2);
+        shm_destroy(name1);
+        shm_destroy(name2);
+        return;
+    }
+
+    /* 
+     * Test 1: Pure SHM infinite wait (npfd=0, timeout=-1) with fork + delay.
+     * This exercises the INT64_MAX loop path: 
+     *   deadline_ms = INT64_MAX
+     *   npfd == 0 → no poll()
+     *   usleep(5000) between peeks
+     *   deadline check at loop bottom (timeout_ms >= 0 is false → skip)
+     *   loops until peek finds data
+     */
+    pid_t pid = fork();
+    CHECK(pid >= 0, "pure_inf: fork");
+
+    if (pid == 0) {
+        /* Child: sleep, send data via SHM tx, exit */
+        usleep(200000);
+        int rc = xlink_send(tx, "pinf_dly", 9);
+        if (rc != 0) _exit(1);
+        _exit(0);
+    }
+
+    /* Parent: alarm safety */
+    alarm(5);
+    xlink_channel_t* chans1[1] = { rx };
+    int ready = xlink_wait(chans1, 1, -1);
+    alarm(0);
+    CHECK(ready == 0, "pure_inf: wait(-1) returns 0");
+
+    if (ready == 0) {
+        uint8_t buf[128];
+        size_t len = sizeof(buf);
+        int rc = xlink_recv(rx, buf, &len);
+        CHECK(rc == 0, "pure_inf: recv OK");
+        CHECK(len == 9 && memcmp(buf, "pinf_dly", 9) == 0,
+              "pure_inf: data content 'pinf_dly'");
+    }
+
+    int status;
+    CHECK(waitpid(pid, &status, 0) == pid, "pure_inf: waitpid");
+    CHECK(WIFEXITED(status), "pure_inf: child exited normally");
+    CHECK(WEXITSTATUS(status) == 0, "pure_inf: child exit status 0");
+
+    /*
+     * Test 2: Pure SHM infinite wait with 2 channels and delayed data on rx2.
+     * Wait should return index 1 (data arrives on rx2 first).
+     */
+    pid = fork();
+    CHECK(pid >= 0, "pure_inf: fork 2-channel");
+
+    if (pid == 0) {
+        usleep(200000);
+        int rc = xlink_send(tx2, "chan2", 6);
+        if (rc != 0) _exit(1);
+        _exit(0);
+    }
+
+    alarm(5);
+    xlink_channel_t* chans2[2] = { rx, rx2 };
+    ready = xlink_wait(chans2, 2, -1);
+    alarm(0);
+    CHECK(ready == 1, "pure_inf: 2-channel wait returns index 1 (data on rx2)");
+
+    if (ready == 1) {
+        uint8_t buf[128];
+        size_t len = sizeof(buf);
+        int rc = xlink_recv(rx2, buf, &len);
+        CHECK(rc == 0, "pure_inf: recv from rx2 OK");
+        CHECK(len == 6 && memcmp(buf, "chan2", 6) == 0,
+              "pure_inf: data content 'chan2'");
+    }
+
+    CHECK(waitpid(pid, &status, 0) == pid, "pure_inf: waitpid 2-channel");
+    CHECK(WIFEXITED(status), "pure_inf: child 2 exited normally");
+    CHECK(WEXITSTATUS(status) == 0, "pure_inf: child 2 exit status 0");
+
+    xlink_close(tx);
+    xlink_close(rx);
+    xlink_close(tx2);
+    xlink_close(rx2);
+    shm_destroy(name1);
+    shm_destroy(name2);
+}
+
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
 
@@ -525,6 +643,7 @@ int main(void) {
     test_mixed_infinite_wait();
     test_pure_shm_wait();
     test_pure_shm_poll_once();
+    test_pure_shm_infinite_wait();
 
     fprintf(stderr, "\n=== %s ===\n", failures ? "FAILED" : "ALL PASSED");
     return failures ? 1 : 0;
