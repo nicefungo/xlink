@@ -353,6 +353,10 @@ static int read_exact(int fd, void* buf, size_t n) {
 
 /* ─── Framing helpers (for client mode with reconnect) ───── */
 
+/* Max retries for writev EAGAIN in non-blocking mode.
+ * Each retry polls POLLOUT with 10ms timeout → ~1s of retry. */
+#define MAX_WRITE_EAGAIN 100
+
 /* Write 4-byte BE length prefix + payload via writev. */
 static int write_framed(int fd, const void* data, size_t len) {
     uint8_t hdr[4];
@@ -367,11 +371,20 @@ static int write_framed(int fd, const void* data, size_t len) {
     iov[1].iov_base = (void*)data;
     iov[1].iov_len  = len;
 
+    int eagain_retries = 0;
     size_t total = 0;
     while (total < 4 + len) {
         ssize_t n = writev(fd, iov, 2);
         if (n < 0) {
             if (errno == EINTR) continue;
+            if ((errno == EAGAIN || errno == EWOULDBLOCK)
+                && eagain_retries < MAX_WRITE_EAGAIN) {
+                struct pollfd pfd = { .fd = fd, .events = POLLOUT };
+                int prc;
+                do { prc = poll(&pfd, 1, 10); } while (prc < 0 && errno == EINTR);
+                eagain_retries++;
+                continue;
+            }
             return -1;
         }
         total += (size_t)n;
