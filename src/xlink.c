@@ -189,7 +189,7 @@ static int frame_send(xlink_channel_t* ch, const void* data, size_t len) {
 /* Forward declaration — linked from libshm_ipc.a */
 extern int shm_destroy(const char* name);
 
-#define MAX_CLEANUP 64
+#define MAX_CLEANUP 256
 
 static char*  cleanup_names[MAX_CLEANUP];
 static int    cleanup_count  = 0;
