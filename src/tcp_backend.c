@@ -499,9 +499,13 @@ static int tcp_backend_send(xlink_channel_t* ch, const void* data, size_t len) {
         ch->fd = -1;
         if (p->recon_backoff == 0)
             p->recon_backoff = 100;
-        snprintf(ch->errbuf, sizeof(ch->errbuf),
-                 "tcp: lost connection: %s (will reconnect)",
-                 strerror(errno));
+        if (save_errno == 0)
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "tcp: lost connection (peer closed, will reconnect)");
+        else
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "tcp: lost connection: %s (will reconnect)",
+                     strerror(errno));
         return -1;
     }
     return 0;
@@ -652,9 +656,13 @@ static int tcp_backend_recv(xlink_channel_t* ch, void* buf, size_t* len) {
         errno = save_errno;
         ch->fd = -1;
         if (p->recon_backoff == 0) p->recon_backoff = 100;
-        snprintf(ch->errbuf, sizeof(ch->errbuf),
-                 "tcp: disconnected: %s (will reconnect)",
-                 strerror(errno));
+        if (save_errno == 0)
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "tcp: peer closed connection (will reconnect)");
+        else
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "tcp: disconnected: %s (will reconnect)",
+                     strerror(errno));
         return -1;
     }
 
