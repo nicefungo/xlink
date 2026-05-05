@@ -463,12 +463,15 @@ static int tcp_backend_send(xlink_channel_t* ch, const void* data, size_t len) {
 
     if (write_framed(ch->fd, data, len) != 0) {
         /* Connection lost — mark for reconnect */
+        int save_errno = errno;
         close(ch->fd);
+        errno = save_errno;
         ch->fd = -1;
         if (p->recon_backoff == 0)
             p->recon_backoff = 100;
         snprintf(ch->errbuf, sizeof(ch->errbuf),
-                 "tcp: lost connection (will reconnect)");
+                 "tcp: lost connection: %s (will reconnect)",
+                 strerror(errno));
         return -1;
     }
     return 0;
@@ -614,11 +617,14 @@ static int tcp_backend_recv(xlink_channel_t* ch, void* buf, size_t* len) {
         }
 
         /* Disconnected */
+        int save_errno = errno;
         close(ch->fd);
+        errno = save_errno;
         ch->fd = -1;
         if (p->recon_backoff == 0) p->recon_backoff = 100;
         snprintf(ch->errbuf, sizeof(ch->errbuf),
-                 "tcp: disconnected (will reconnect)");
+                 "tcp: disconnected: %s (will reconnect)",
+                 strerror(errno));
         return -1;
     }
 
