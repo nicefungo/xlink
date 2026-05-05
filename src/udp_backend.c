@@ -230,8 +230,12 @@ static int udp_backend_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     do { n = recvfrom(ch->fd, buf, *len, 0, NULL, NULL); }
     while (n < 0 && errno == EINTR);
     if (n < 0) {
-        snprintf(ch->errbuf, sizeof(ch->errbuf),
-                 "udp recvfrom: %s", strerror(errno));
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "udp: no data");
+        else
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "udp recvfrom: %s", strerror(errno));
         return -1;
     }
     *len = (size_t)n;

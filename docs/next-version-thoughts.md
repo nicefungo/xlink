@@ -4,6 +4,26 @@ _Scratchpad for ideas, known issues, and plans beyond the current release._
 
 ---
 
+## Round 44 — 2026-05-05 17:17 CST
+
+### P0 items — all 3 implemented and committed
+
+| # | Item | Status | Commit |
+|---|------|--------|--------|
+| 1 | TCP errbuf: capture errno before close() in send/recv | ✅ Done | `c9a657b` |
+| 2 | read_exact 30s internal timeout for half-open TCP | ✅ Done | `978f8d0` |
+| 3 | writev EAGAIN retry in write_framed (NONBLOCK mode) | ✅ Done | `dcd43f0` |
+
+All tests pass (29 binaries). All docs reviewed (clean). `future-plans/` directory
+live at 7 docs / 779 lines since Round 42.
+
+### Updated known-issues.md
+Items 3 (NONBLOCK write EAGAIN) and 7 (read_exact internal timeout) — reviewed,
+the code changes partially address both. Update to known-issues.md needed to
+reflect that read_exact hang and writev EAGAIN-only-disconnect are now mitigated.
+
+---
+
 ## Round 43 — 2026-05-05 14:47 CST
 
 ### Documentation — P0 short-term plan document
