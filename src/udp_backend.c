@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -242,6 +243,19 @@ static int udp_backend_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     return 0;
 }
 
+static int udp_backend_read(xlink_channel_t* ch, void* buf, size_t len, int timeout_ms) {
+    struct pollfd pfd = { .fd = ch->fd, .events = POLLIN };
+    int rc;
+    do { rc = poll(&pfd, 1, timeout_ms); } while (rc < 0 && errno == EINTR);
+    if (rc <= 0) {
+        if (rc == 0) errno = ETIMEDOUT;
+        return -1;
+    }
+    size_t n = len;
+    int ret = udp_backend_recv(ch, buf, &n);
+    return (ret == 0) ? (int)n : -1;
+}
+
 const xlink_backend_t xlink_udp_backend = {
     .type  = XLINK_UDP,
     .name  = "udp",
@@ -250,6 +264,6 @@ const xlink_backend_t xlink_udp_backend = {
     .send  = udp_backend_send,
     .recv  = udp_backend_recv,
     .write = NULL,
-    .read  = NULL,
+    .read  = udp_backend_read,
     .peek  = NULL,
 };
