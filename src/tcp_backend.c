@@ -670,6 +670,47 @@ static int tcp_backend_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     return recv_multi(p, ch, buf, len);
 }
 
+/* ─── Timed read (xlink_read) ──────────────────────────── */
+
+static int tcp_backend_read(xlink_channel_t* ch, void* buf, size_t len, int timeout_ms) {
+    tcp_priv_t* p = (tcp_priv_t*)ch->priv;
+
+    if (!p) {
+        /* Legacy single-fd path */
+        struct pollfd pfd = { .fd = ch->fd, .events = POLLIN };
+        int rc;
+        do { rc = poll(&pfd, 1, timeout_ms); } while (rc < 0 && errno == EINTR);
+        if (rc <= 0) {
+            if (rc == 0) errno = ETIMEDOUT;
+            return -1;
+        }
+        ssize_t n;
+        do { n = read(ch->fd, buf, len); } while (n < 0 && errno == EINTR);
+        if (n < 0) return -1;
+        return (int)n;
+    }
+
+    if (p->is_client) {
+        /* Client mode: poll on connected fd, then use recv (handles framing).
+         * In server mode (recv_multi) we skip the pre-poll since recv_multi
+         * polls its own set of fds (listen + all clients). */
+        if (ch->fd >= 0) {
+            struct pollfd pfd = { .fd = ch->fd, .events = POLLIN };
+            int rc;
+            do { rc = poll(&pfd, 1, timeout_ms); } while (rc < 0 && errno == EINTR);
+            if (rc <= 0) {
+                if (rc == 0) errno = ETIMEDOUT;
+                return -1;
+            }
+        }
+    }
+
+    /* Data available (or disconnected/need-reconnect) — let recv handle it */
+    size_t n = len;
+    int ret = tcp_backend_recv(ch, buf, &n);
+    return (ret == 0) ? (int)n : -1;
+}
+
 /* ─── Backend vtable ────────────────────────────────────── */
 
 const xlink_backend_t xlink_tcp_backend = {
@@ -680,6 +721,6 @@ const xlink_backend_t xlink_tcp_backend = {
     .send  = tcp_backend_send,
     .recv  = tcp_backend_recv,
     .write = NULL,
-    .read  = NULL,
+    .read  = tcp_backend_read,
     .peek  = NULL,
 };

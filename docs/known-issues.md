@@ -2,27 +2,17 @@
 
 ## 1. xlink_read() silently ignores timeout_ms on backends without .read vtable
 
-**Status**: Minor (design limitation)
+**Status**: ✅ **TCP backend fixed**. Other backends (SHM, UDP, File, Pipe, Serial) still have `.read = NULL` and ignore timeout_ms.
 
-**Affected backends**: SHM, UDP, File (`.read = NULL`)
+**Fix** (TCP, `edc1bfe`): `tcp_backend_read()` uses `poll(fd, POLLIN, timeout_ms)` to wait
+for data, then delegates to `tcp_backend_recv()` for framing + reconnect. Client
+mode polls the connected fd; server mode skips pre-poll and lets `recv_multi()`
+handle its own poll set.
 
-**Description**: `xlink_read()` accepts a `timeout_ms` parameter, but on backends
-where `.read` is not defined in the vtable, it falls back to:
-```c
-if (ch->backend->read)
-    return ch->backend->read(ch, buf, len, timeout_ms);
-/* fallback: ignores timeout_ms */
-size_t n = len;
-if (ch->backend->recv(ch, buf, &n) == 0)
-    return (int)n;
-return -1;
-```
-The `timeout_ms` value is silently dropped. This means `xlink_read()` with a
-short timeout on SHM/UDP/File backends blocks indefinitely.
+**Affected backends (still broken)**: SHM, UDP, File, Pipe, Serial
 
-**Workaround**: Only use `xlink_read()` with timeout on backends where `.read` is
-defined (currently none — this is for future expansion). Use `xlink_recv()`
-with `xlink_wait()` for timed receive on those backends.
+**Workaround**: Use `xlink_wait(chans, 1, timeout_ms)` then `xlink_recv()` — this
+works on all backends.
 
 ## 2. SHM atexit cleanup has a fixed 64-entry cap
 

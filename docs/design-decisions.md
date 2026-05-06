@@ -50,19 +50,20 @@ communication errors. If this is a concern, always specify a known rate.
 
 ## 3. xlink_read() Ignores timeout_ms on Backends Without .read Vtable
 
-**Where**: `src/xlink.c` — `xlink_read()`
+**Where**: `src/xlink.c` — `xlink_read()` (core), `src/tcp_backend.c` (TCP fix)
 
 **What**: When a backend has `.read = NULL`, `xlink_read()` falls through to
 `.recv()`, which has no timeout parameter. The caller's `timeout_ms` is silently
 ignored and the call blocks indefinitely.
 
-**Why**:
-- Adding `.read` to all 6 backends would require each to implement poll-based
-  timed I/O, which is non-trivial for shared memory (no direct fd to poll).
-- The workaround is simple: use `xlink_wait(chans, 1, timeout_ms)` followed by
-  `xlink_recv()` — this works on all backends.
-- `.read` exists as a future extension for backends that can efficiently
-  implement timed reads (e.g., TCP with `setsockopt` RCVTIMEO).
+**Status**: ✅ TCP backend fixed (`tcp_backend_read` uses `poll` + `recv`).
+Other 5 backends (SHM, UDP, File, Pipe, Serial) still have `.read = NULL`.
+
+**Why it's hard to fix for all backends**:
+- SHM has no fd to poll on (relies on `shm_ipc` internal signaling)
+- Pipe and Serial could use poll but need fd extraction from priv struct
+- UDP would work but needs framing translation
+- File I/O doesn't have poll semantics
 
 **Workaround**:
 ```c
