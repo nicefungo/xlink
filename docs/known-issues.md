@@ -2,17 +2,12 @@
 
 ## 1. xlink_read() silently ignores timeout_ms on backends without .read vtable
 
-**Status**: ✅ **TCP backend fixed**. Other backends (SHM, UDP, File, Pipe, Serial) still have `.read = NULL` and ignore timeout_ms.
+**Status**: ✅ **4 backends fixed** (TCP, Pipe, Serial, UDP). Only SHM (no pollable fd)
+and File (regular file poll always returns POLLIN, timeout ignored) remain.
 
-**Fix** (TCP, `edc1bfe`): `tcp_backend_read()` uses `poll(fd, POLLIN, timeout_ms)` to wait
-for data, then delegates to `tcp_backend_recv()` for framing + reconnect. Client
-mode polls the connected fd; server mode skips pre-poll and lets `recv_multi()`
-handle its own poll set.
-
-**Affected backends (still broken)**: SHM, UDP, File, Pipe, Serial
-
-**Workaround**: Use `xlink_wait(chans, 1, timeout_ms)` then `xlink_recv()` — this
-works on all backends.
+**Fix** (`abf9880` TCP, `ba66ba7` Pipe/Serial/UDP): Each poll's `ch->fd` with
+`poll(fd, POLLIN, timeout_ms)` then delegates to the existing `.recv()`
+implementation for message framing.
 
 ## 2. SHM atexit cleanup has a fixed 64-entry cap
 

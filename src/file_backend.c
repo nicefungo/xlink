@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/stat.h>
 
 /*
@@ -87,6 +88,22 @@ static int file_backend_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     return 0;
 }
 
+static int file_backend_read(xlink_channel_t* ch, void* buf, size_t len, int timeout_ms) {
+    /* Regular file poll always returns immediately (files are always "ready").
+     * Timeout is effectively ignored, but this matches xlink_read() semantics
+     * for non-seekable reads. */
+    struct pollfd pfd = { .fd = ch->fd, .events = POLLIN };
+    int rc;
+    do { rc = poll(&pfd, 1, timeout_ms); } while (rc < 0 && errno == EINTR);
+    if (rc <= 0) {
+        if (rc == 0) errno = ETIMEDOUT;
+        return -1;
+    }
+    size_t n = len;
+    int ret = file_backend_recv(ch, buf, &n);
+    return (ret == 0) ? (int)n : -1;
+}
+
 const xlink_backend_t xlink_file_backend = {
     .type  = XLINK_FILE,
     .name  = "file",
@@ -95,6 +112,6 @@ const xlink_backend_t xlink_file_backend = {
     .send  = file_backend_send,
     .recv  = file_backend_recv,
     .write = NULL,
-    .read  = NULL,
+    .read  = file_backend_read,
     .peek  = NULL,
 };
