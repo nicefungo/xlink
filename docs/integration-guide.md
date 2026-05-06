@@ -435,30 +435,16 @@ recv_msg() {
 
 ## 8. 调试与验证
 
-### 8.1 使用 xlink 自带工具验证
-
-在模块开发期间，用 xlink CLI 模拟对端：
-
-```sh
-# 终端 1：模拟模块 B
-bin/tools/recv --create pipe /tmp/xlink_test
-
-# 终端 2：模拟模块 A 发消息
-bin/tools/send pipe /tmp/xlink_test
-# 输入消息内容（stdin），Ctrl+D 发送
-```
-
-对于 TCP：
+xlink CLI 工具源码位于 `tools/` 目录（`send.c` / `recv.c` / `bridge.c` / `monitor.c`），
+但尚未加入 `Makefile` 构建系统。如需使用，可手动编译：
 
 ```sh
-# 终端 1
-bin/tools/recv --server tcp :9000
-
-# 终端 2
-echo "hello module" | bin/tools/send tcp 127.0.0.1:9000
+cd xlink
+cc -I include -I third_party/shm_ipc/include tools/send.c bin/libxlink.a \
+   -L third_party/shm_ipc/bin -lshm_ipc -lpthread -lrt -o bin/send
 ```
 
-### 8.2 hex 抓包验证帧格式
+### 8.1 验证帧格式（无需 CLI 工具）
 
 用 `xxd` 检查线缆格式是否正确：
 
@@ -467,19 +453,17 @@ echo "hello module" | bin/tools/send tcp 127.0.0.1:9000
 cat /tmp/xlink_test | xxd | head
 
 # 输出示例（发送 "hi"）：
-# 00000000: 0000 0002 6869                      ....hi
+# 00000000: 0000 0002 6866                      ....hi
 #                       ^^-- 4 字节长度头（2）
 #                                ^^-- 载荷（"hi"）
 ```
 
-### 8.3 桥接验证
+### 8.2 验证测试
 
-把模块的传输桥接到另一个能观察的传输上：
+用现有测试套件验证功能完整性：
 
 ```sh
-# 模块输出到 TCP :9000，桥接一份到 SHM /monitor
-bin/tools/bridge tcp :9000 shm /monitor
-bin/tools/monitor shm /monitor
+cd xlink && make clean && make test
 ```
 
 ---

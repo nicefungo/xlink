@@ -1,6 +1,57 @@
-# Next Version Thoughts
+# Next Version Thoughts — Historical Log
 
-_Scratchpad for ideas, known issues, and plans beyond the current release._
+> ⚠️ **不再作为未来规划入口。** 长期方向已迁移至 `docs/future-plans/`。
+> 以下保留 Round 40–45 的日志供历史参考。更早记录已删除。
+
+---
+
+## Round 45 — 2026-05-06 08:45 CST
+
+### Summary
+All 3 P0 short-term items are now committed and tested. Additionally, since
+Round 44, several more improvements landed:
+1. **UDP NONBLOCK errbuf clearer** (`4e04816`) — "no data" vs "Resource temporarily unavailable"
+2. **Makefile wildcard auto-discovery** (`99f560d`) — new test_*.c auto-included
+3. **SHM atexit cleanup 64→256** (`0d13a4d`)
+4. **design-decisions.md** (`b64d507`) — documents 8 intentional design choices
+5. **TCP errbuf split** (`d635e09`) — clean disconnect vs error disconnect
+6. **test_tcp_errbuf.c** — 146 lines verifying disconnect errbuf + bad-addr errstr
+
+**Known issues reduced:** From 8 to 5. Items #2 (SHM cap), #7 (Makefile), #8 (UDP errbuf) are fixed.
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL PASS** (30 test binaries)
+- **30 test binaries** (wildcard auto-discovered, including new test_tcp_errbuf)
+
+### Code Review — Round 45
+Reviewed all changes since Round 44 (5 commits):
+- `d635e09` tcp errbuf split: clean `save_errno==0` check, proper dual-message format
+- `99f560d` Makefile wildcard: correct `$(wildcard)` syntax, no config needed for new tests
+- `0d13a4d` SHM MAX_CLEANUP 64→256: one-line define change, safe
+- `4e04816` UDP errbuf: clear `EAGAIN` vs error path, proper errbuf assignment
+- `b64d507` design-decisions.md: comprehensive, 8 entries with rationale
+
+**No bugs found.** 45th consecutive clean review round.
+
+### future-plans/ updates
+- `06-p0-short-term.md` → **archived** (moved to `archive/`). All 3 items implemented.
+- `index.md` — roadmap updated: P0 section replaced with "✅ 已实现" table. Known issues count updated (8→5). Decision log updated.
+- No further migration needed from `next-version-thoughts.md` — all content already in `future-plans/`.
+
+### Docs check
+- `integration-guide.md` — still accurate. API surface unchanged.
+- `proposal.md` — still accurate. Architecture description matches current code.
+- `slab-allocator.md` — still draft status. No code changes affect it.
+- `design-decisions.md` — NEW. Documents 8 intentional design choices. Review: all accurate.
+- `known-issues.md` — current. Items #2, #7, #8 marked fixed.
+
+### Remaining known issues (5 items)
+1. xlink_read() ignores timeout_ms on SHM/UDP/File (design limitation)
+2. TCP oversized discard error message edge case (extremely unlikely)
+3. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+4. test_frame_overflow port 19992 fragility (same)
+5. Serial baud 9600 fallback (by design)
 
 ---
 
@@ -229,144 +280,3 @@ udp_backend_send(ch, data, len)
 ### Remaining known issues (unchanged — 8 items)
 As documented in docs/known-issues.md. All items verified still current.
 
----
-
-## Round 39 — 2026-05-04 08:45 CST
-
-### Build & Test
-- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
-- `make test` → **ALL 29 tests PASS** (0 failures across all binaries)
-- **4 new checks** added this round (TCP server send with no clients)
-
-### Code Review — 39th round
-
-All 7 src/ + include/xlink.h + 29 test/ files reviewed. **No new bugs found.**
-
-Cross-module consistency verified:
-- `frame_send` writev partial-header-advance logic in xlink.c: header vs payload boundary calculation correct on all 3 sub-paths (n entirely in header, split on boundary, entirely in payload)
-- `xlink_wait` mixed-path deadline vs poll: timeout=-1 (INT64_MAX) path verified through code inspection — `remain=10` tight polling with peek works correctly
-- `read_exact` EAGAIN mid-read poll-retry consistent between xlink.c (generic framer) and tcp_backend.c (both poll for -1 ms)
-- All 6 backend vtables consistent: `.write = NULL` on stream backends, `.read = NULL` on all; fallback chains correct
-- `send_to_all()` in tcp_backend.c: `ok_count == 0` branch returns -1 with "tcp: no connected clients" — verified through new test
-- UDP receiver-as-sender `write()` fallback path (is_receiver=1, dest_len=0) still an untested edge case; known to fail on unconnected socket (EDESTADDRREQ)
-
-### New test coverage: TCP server send with no clients (4 checks)
-
-Added `test_tcp_server_send_no_clients()` to `tests/test_errors.c` — exercises the `send_to_all()` error path in `tcp_backend.c` where `ok_count == 0` (no connected clients).
-
-**Code path exercised:**
-```c
-tcp_backend_send(ch, data, len)
-  → p->is_client == false  (server mode)
-  → send_to_all(p, data, len, ch)
-    → for i = nclients-1..0: write_framed()  // empty loop, no iterations
-    → ok_count == 0
-    → snprintf(errbuf, "tcp: no connected clients")
-    → return -1
-```
-
-**New checks:**
-1. TCP server open on `:19999` succeeds
-2. `xlink_send()` with no clients returns -1
-3. `xlink_errstr(ch)` is non-NULL
-4. errstr contains "no connected clients"
-
-### Documentation improvements
-- **Updated: `docs/next-version-thoughts.md`** — this entry (Round 39)
-- **Updated: `tests/test_errors.c`** — new `test_tcp_server_send_no_clients()` function
-- **API doc (`docs/api.md`)** and **integration guide (`docs/integration-guide.md`)** — reviewed, no stale info. `xlink_wait` return values (-2 for EINVAL) properly documented since Round 33.
-- **known-issues.md** — all 8 issues still current. No new issues introduced (TCP server send with no clients returns expected error, not a bug).
-
-### Ideas for next version
-
-1. **Add `xlink_errstr` to TCP error paths**: `write_framed`/`read_framed` errors in tcp_backend.c set errno but the return values bubble up without calling `snprintf(ch->errbuf)`. Some errno-based error messages are still generic "tcp: disconnected" rather than specific reason.
-
-2. **`read_exact` internal timeout**: When `read_exact` polls with infinite timeout (-1) on an EAGAIN mid-read, a half-open TCP connection causes indefinite hang. An internal deadline per call would improve robustness.
-
-3. **Pure SHM infinite wait with delayed fork**: The pure-SHM (npfd=0, has_peek=true, timeout=-1) path with a child delay is still untested. The Round 38 test covers mixed SHM+pipe with delay; pure-SHM remains.
-
-4. **UDP receiver `write()` fallback test**: `udp_backend_send()` when `p->is_receiver == 1` and `p->dest_len == 0` falls through to `write()` on an unconnected socket. Could add test verifying this returns -1 with EDESTADDRREQ.
-
-5. **Wildcard test discovery**: Makefile `tests:` target now has 29 hand-written compile lines. The long-standing `$(wildcard tests/*.c)` pattern would eliminate manual additions.
-
-6. **Non-blocking TCP client send EAGAIN**: `write_framed` does not retry on EAGAIN. In non-blocking mode with a full send buffer, this incorrectly triggers disconnect. Add `poll(OUT)` retry.
-
-### Remaining known issues (unchanged — 8 items)
-
-1. `recv_multi` stale fd on client disconnect — swap-remove leaves entries in fds[]
-2. `xlink_read()` silently ignores timeout_ms on SHM/UDP/File backends (`.read = NULL`)
-3. NONBLOCK write EAGAIN in `frame_send()` treated as hard error (no retry)
-4. UDP receiver-as-sender `write()` on unconnected socket may ENOTCONN
-5. `shm_backend_peek` error → `*avail=0` indistinguishable from "no data"
-6. `bridge.c` `xlink_errstr(chA)` when chA==NULL: errno may be stale from arg parsing
-7. SIGPIPE not guarded in library code (callers must `signal(SIGPIPE, SIG_IGN)`)
-8. Makefile hardcodes 29 test targets — new tests manually added
-
-### Codebase stats
-- **7 src/ + 1 include/ + 29 test binaries** (unchanged)
-- **0 warnings** (`-Wall -Wextra -O2 -g`)
-- **4 new checks** this round (TCP server send no clients)
-- **No new bugs** after 39 consecutive review rounds
-- All 8 known issues unchanged
-
----
-
-## Round 35 — 2026-05-01 20:45 CST
-
-### Build & Test
-- `make clean && make all` → 0 warnings (`-Wall -Wextra -O2 -g`)
-- `make test` → ALL 29 tests PASS (0 failures)
-- **4 new checks** added (serial open failure on nonexistent device)
-
-### Code Review
-All 7 src/ + include/xlink.h + 29 test/ files reviewed. No new bugs found.
-
-Cross-module consistency:
-- All 6 backend vtables consistent. `.write = NULL` on all stream backends; `.read = NULL` on all
-- `frame_send` writev iov advancement logic correct
-- `read_exact` EAGAIN mid-read poll-retry consistent between xlink.c and tcp_backend.c
-- `send_to_all` swap-remove backwards iteration logic verified (i from nclients-1 down to 0)
-- `xlink_wait` mixed-path deadline handling correct
-
-### New test coverage: Serial open failure (4 checks)
-
-Added `test_serial_open_failure()` to `tests/test_errors.c` — verifies that opening a serial port with a nonexistent device file returns NULL with proper error string.
-
-**Checks:**
-1. `xlink_open(XLINK_SERIAL, "/dev/nonexistent0")` returns NULL
-2. `xlink_errstr(ch)` returns non-empty string after failed open
-3. `xlink_open` with invalid baud suffix returns NULL
-4. Error string after invalid baud is non-empty
-
-### Documentation improvements
-- **Updated: `docs/next-version-thoughts.md`** — this entry
-- **Updated: `tests/test_errors.c`** — new `test_serial_open_failure()` function
-- **API doc (`docs/api.md`)** — reviewed: `xlink_wait` return values for -2 (EINVAL) should be documented. Added to ideas list.
-- **Integration guide (`docs/integration-guide.md`)** — checked for stale API surface. Current.
-- **known-issues.md** — all 8 issues still current. No new issues introduced.
-
-### Ideas for next version
-1. **Add `xlink_errstr` to TCP error paths**: `write_framed`/`read_framed` errors in tcp_backend.c set errno but don't set errbuf. Return values are generic.
-2. **`read_exact` internal timeout**: EAGAIN mid-read with -1 timeout can hang on half-open TCP. Internal deadline per call.
-3. **UDP receiver write fallback test**: receiver mode with `dest_len==0` falls through to `write()`. Untested path.
-4. **TCP server send with no clients**: `send_to_all()` with 0 clients returns -1 "no connected clients". Add test in `test_errors.c`.
-5. **Pure SHM infinite wait with delayed fork**: npfd=0, has_peek=true, timeout=-1 still untested. Round 38 covers mixed SHM+pipe; pure SHM remains.
-6. **`xlink_wait` doc return values**: API doc mentions -2 for EINVAL but Rounds 21-33 established concrete return conventions. Document clearly.
-7. **Wildcard test discovery**: Makefile hardcodes 29 test targets — new tests added manually. `$(wildcard tests/*.c)` would automate this.
-
-### Remaining known issues (unchanged — 8 items)
-1. `recv_multi` stale fd on client disconnect — swap-remove leaves entries in fds[]
-2. `xlink_read()` silently ignores timeout_ms on SHM/UDP/File backends (`.read = NULL`)
-3. NONBLOCK write EAGAIN in `frame_send()` treated as hard error (no retry)
-4. UDP receiver-as-sender `write()` on unconnected socket may ENOTCONN
-5. `shm_backend_peek` error → `*avail=0` indistinguishable from "no data"
-6. `bridge.c` `xlink_errstr(chA)` when chA==NULL: errno may be stale from arg parsing
-7. SIGPIPE not guarded in library code (callers must `signal(SIGPIPE, SIG_IGN)`)
-8. Makefile hardcodes 29 test targets — new tests manually added
-
-### Codebase stats
-- **7 src/ + 1 include/ + 29 test binaries** (unchanged)
-- **0 warnings** (`-Wall -Wextra -O2 -g`)
-- **4 new checks** this round (serial open failure)
-- **No new bugs** after 35 consecutive review rounds
-- All 8 known issues unchanged

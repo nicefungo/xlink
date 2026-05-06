@@ -1,5 +1,9 @@
 # xlink — Cross-App Communication Toolkit
 
+> **实现状态：** 核心库已实现。6 个后端全部完成（SHM, PIPE, TCP, UDP, SERIAL, FILE）。
+> CLI 工具源码存在但尚未加入构建系统。RTSP 端口的枚举已预留，后端未实现。
+> 详见下方各章节的 ✅/⏳ 标记。
+
 ## 项目目标
 
 为 C/C++ 工程师提供一套**统一 API 的跨应用/跨设备通信工具箱**，覆盖：
@@ -294,13 +298,14 @@ void bridge_loop(xlink_channel_t* a, xlink_channel_t* b, int bidir) {
 
 ## 5. CLI 工具
 
-| 工具 | 功能 |
-|------|------|
-| `xlink-send` | 从 stdin 读取并发送到 channel |
-| `xlink-recv` | 从 channel 接收并写入 stdout |
-| `xlink-bridge` | 在两个 channel 之间转发 |
-| `xlink-monitor` | 监听 channel 并打印 hex dump |
-| `xlink-pipe` | 创建临时 bridge 并暴露为 FIFO（与旧工具兼容） |
+> 源码均已实现（`tools/` 目录），但未加入构建系统。如需使用，可手动编译。
+
+| 工具 | 源文件 | 功能 |
+|------|--------|------|
+| `xlink-send` | `tools/send.c` | 从 stdin 读取并发送到 channel |
+| `xlink-recv` | `tools/recv.c` | 从 channel 接收并写入 stdout |
+| `xlink-bridge` | `tools/bridge.c` | 在两个 channel 之间转发 |
+| `xlink-monitor` | `tools/monitor.c` | 监听 channel 并打印 hex dump |
 
 这些工具让**无需写代码就能连接不同模块**——shell 脚本也能用。
 
@@ -308,46 +313,41 @@ void bridge_loop(xlink_channel_t* a, xlink_channel_t* b, int bidir) {
 
 ## 6. 实现路线图
 
-### Phase 1 — 核心框架 + SHM + Pipe（~2 天）
+### Phase 1 — 核心框架 + SHM + Pipe ✅
 
 ```
 xlink.h / xlink.c        # API 调度层、错误处理、framing 层
 shm_backend.c             # 封装 shm_ipc 作为后端
 pipe_backend.c            # 命名管道
-xlink-send / xlink-recv   # 基本 CLI
 ```
 
-交付物：能 `xlink-send shm://test "hello"`，另一进程 `xlink-recv shm://test` 收到。
+交付物：SHM 和 PIPE 通道可通过统一 API 收发消息。
 
-### Phase 2 — 网络传输 + 桥接（~3 天）
+### Phase 2 — 网络传输 + 桥接 ✅
 
 ```
 tcp_backend.c             # TCP client + server
 udp_backend.c             # UDP unicast + multicast
-xlink-bridge              # 双通道转发
 ```
 
-交付物：`xlink-bridge shm://my_shm tcp://:8080` 工作。
+交付物：TCP 和 UDP 通道可通过统一 API 收发消息。桥接源码存在（`tools/bridge.c`）但未加入构建系统。
 
-### Phase 3 — 串口 + 文件（~1 天）
+### Phase 3 — 串口 + 文件 ✅
 
 ```
 serial_backend.c          # RS-232/485
 file_backend.c            # dump / replay
-xlink-monitor             # hex dump 监控
 ```
 
-交付物：能从 `/dev/ttyUSB0` 收数据，桥接到 TCP 或 SHM。
+交付物：串口和 File I/O 通道可通过统一 API 收发消息。
 
-### Phase 4 — RTSP + 稳定性（~3 天）
+### Phase 4 — RTSP + 稳定性 ⏳（未实现）
 
 ```
-rtsp_backend.c            # RTSP over TCP → RTP depay
-xlink-pipe                # 兼容旧应用的 FIFO bridge
-自动重连 / 心跳           # 网络断开时自动重连
+rtsp_backend.c            # RTSP over TCP → RTP depay（枚举已预留，实现待定）
 ```
 
-交付物：`xlink-recv rtsp://camera/stream1 | ./ai_detector`。
+交付物：RTSP 后端尚未实现。`XLINK_RTSP` 枚举已预留。
 
 ---
 
@@ -392,43 +392,32 @@ shm_ipc/
 
 ---
 
-## 10. 快速验证用例
+## 10. 快速验证（通过测试）
 
-拿到 Phase 1 你就能验证它的能力：
-
-```sh
-# 终端 1：打开 SHM 通道，从键盘发送消息
-xlink-send shm://chat
-> hello from terminal 1
-
-# 终端 2：在同一 SHM 上接收
-xlink-recv shm://chat
-< hello from terminal 1
-```
+当前验证方式直接运行测试套件：
 
 ```sh
-# 把串口传感器的数据桥接到网络
-xlink-bridge serial:///dev/ttyUSB0:115200 tcp://:8080
-
-# 另一台机器上接收
-xlink-recv tcp://192.168.1.5:8080 | ./process_sensor_data
+make clean && make all && make test
 ```
 
-```sh
-# 录制 + 回放测试
-xlink-bridge serial:///dev/ttyUSB0:115200 file:///tmp/capture.bin
-# 离线分析时回放
-xlink-bridge file:///tmp/capture.bin shm://replay
-```
+测试覆盖了所有 6 个后端的基础收发、边界条件、错误路径。测试源码在 `tests/` 目录，`Makefile` 使用 wildcard 自动发现新测试。
 
 ---
 
-## 下一步
+## 附录：当前实现状态表
 
-你希望从哪个阶段开始？我的建议：
-
-1. **先从 Phase 1 核心框架开始** —— 定义好 API 骨架，把 `shm_ipc` 封装进去，加 Pipe 后端
-2. 这样你马上就能试用统一的 `xlink_*` API 替代 `shm_*`
-3. 再逐步加 TCP、UDP、串口
-
-要现在就开干吗？
+| 组件 | 状态 | 备注 |
+|------|------|------|
+| Core API (`xlink.h` / `xlink.c`) | ✅ 完成 | vtable 分发、framing、错误处理 |
+| SHM Backend | ✅ 完成 | 复用 shm_ipc |
+| PIPE Backend | ✅ 完成 | 命名管道 |
+| TCP Backend | ✅ 完成 | Client + Server，自动重连 |
+| UDP Backend | ✅ 完成 | Unicast + Multicast |
+| SERIAL Backend | ✅ 完成 | RS-232/485 |
+| FILE Backend | ✅ 完成 | 录制/回放 |
+| RTSP Backend | ⏳ 未实现 | 枚举已预留 |
+| CLI Tools | ⏳ 源码就绪 | 4 个工具（send/recv/bridge/monitor），未加入构建系统 |
+| Slab Allocator | 📝 设计讨论 | 见 `docs/slab-allocator.md` |
+| 插件化架构 | 📝 规划中 | 见 `docs/future-plans/01-plugins-arch.md` |
+| 异步 I/O | 📝 规划中 | 见 `docs/future-plans/02-async-io.md` |
+| TLS 加密 | 📝 规划中 | 见 `docs/future-plans/03-tls-security.md` |
