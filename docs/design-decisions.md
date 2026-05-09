@@ -56,8 +56,9 @@ communication errors. If this is a concern, always specify a known rate.
 `.recv()`, which has no timeout parameter. The caller's `timeout_ms` is silently
 ignored and the call blocks indefinitely.
 
-**Status**: ✅ TCP, Pipe, Serial, UDP fixed (poll + recv). Only SHM and File remain.
-(File: regular files always poll as "ready", so timeout doesn't apply meaningfully.)
+**Status**: ✅ All 5 fd-based backends fixed (TCP, Pipe, Serial, UDP, File). Only SHM remains.
+(File: regular files always poll as "ready" on Linux, so timeout is effectively
+ignored — same behavior as the old NULL fallback, but the path is now explicit.)
 
 **Why it's hard to fix for all backends**:
 - SHM has no fd to poll on (relies on `shm_ipc` internal signaling)

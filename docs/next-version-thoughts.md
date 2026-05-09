@@ -5,7 +5,43 @@
 
 ---
 
-## Round 45 — 2026-05-06 08:45 CST
+## Round 46 — 2026-05-08 08:45 CST
+
+### Summary
+Regular weekly review. Codebase stable — 46th consecutive clean round.
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL PASS** (30 test binaries)
+- **30 test binaries** (unchanged since Round 45)
+
+### Code Review — Round 46
+Reviewed all changes since Round 45 (3 commits):
+- `279b8e0` code-walkthrough.md — comprehensive architecture guide (442 lines, all 6 backends covered)
+- `0331ba6` test_read_timeout — 6 checks verifying xlink_read timeout on pipe (0, 100ms, -1)
+- `6d6e28a` docs sync — all docs updated to reflect current implementation status
+
+**No bugs found.** 46th consecutive clean review round.
+
+### future-plans/ updates
+- `index.md` — roadmap updated: "近期已完成" section added for .read vtable work. Decision log updated with May 7/May 8 entries. Known issues status synced (#1 partially fixed).
+- No structural changes to the 5 plan docs (01–05) — they remain forward-looking and accurate.
+- `archive/06-p0-short-term.md` — still archived (all items implemented).
+
+### Docs check
+- `integration-guide.md` — still accurate. API surface unchanged. The `.read` vtable addition is internal only.
+- `proposal.md` — still accurate. Architecture description matches current code. "附录：当前实现状态表" correctly lists slab/plugin/async as "规划中".
+- `slab-allocator.md` — still draft status. No code changes affect it. Remains a design discussion pending benchmark justification.
+- `design-decisions.md` — accurate. Entry #3 updated to reflect .read fix status.
+- `known-issues.md` — current. Entry #1 updated (5 backends fixed, SHM remains).
+- `code-walkthrough.md` — NEW. Comprehensive architecture guide.
+
+### Remaining known issues (5 items)
+1. xlink_read() timeout ignored on SHM (shm_ipc has no pollable fd — by design)
+2. TCP discard error message edge case (extremely unlikely)
+3. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+4. test_frame_overflow port 19992 fragility (same)
+5. Serial baud 9600 fallback (by design)
 
 ### Summary
 All 3 P0 short-term items are now committed and tested. Additionally, since
