@@ -316,3 +316,41 @@ udp_backend_send(ch, data, len)
 ### Remaining known issues (unchanged — 8 items)
 As documented in docs/known-issues.md. All items verified still current.
 
+---
+
+## Round 47 — 2026-05-09 08:45 CST
+
+### Summary
+Codebase stable — 47th consecutive clean round. No new commits since Round 46.
+Docs-focused round: existing docs verified, uncommitted Round 46 docs committed,
+future-plans/ roadmap synced.
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL PASS** (30 test binaries, unchanged)
+
+### Code Review — Round 47 (skip: last review was yesterday Round 46)
+
+### future-plans/ updates
+- Committed Round 46 uncommitted doc changes (4 files, 60 insertions):
+  - `design-decisions.md` — .read vtable status (5/6 backends fixed)
+  - `future-plans/index.md` — roadmap updated through May 8
+  - `next-version-thoughts.md` — this entry (Round 47)
+  - `slab-allocator.md` — note: still draft, pending benchmark justification
+- `future-plans/index.md` — updated last-updated to 2026-05-09, decision log updated
+
+### Docs check
+- `integration-guide.md` — still accurate (499 lines). API surface unchanged. xlink_read(timeout_ms) signature matches include/xlink.h.
+- `proposal.md` — still accurate (423 lines). Implementation status appendix correctly lists slab/plugin/async as "规划中".
+- `slab-allocator.md` — still draft. No code changes affect it.
+- `design-decisions.md` — accurate. Entry #3 (.read timeout) correctly updated.
+- `known-issues.md` — current. 5 items, all verified.
+- `code-walkthrough.md` — current (added Round 46, 692 lines).
+
+### Remaining known issues (5 items — unchanged)
+1. xlink_read() timeout ignored on SHM (by design — no pollable fd)
+2. TCP discard error message edge case (extremely unlikely)
+3. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+4. test_frame_overflow port 19992 fragility (same)
+5. Serial baud 9600 fallback (by design)
+
