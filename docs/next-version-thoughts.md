@@ -391,3 +391,40 @@ All forward-looking content already in `future-plans/`. This file is purely a hi
 4. test_frame_overflow port 19992 fragility (same)
 5. Serial baud 9600 fallback (by design)
 
+---
+
+## Round 49 — 2026-05-11 08:45 CST
+
+### Summary
+Codebase stable — 49th consecutive clean round. No new commits since Round 48 (May 10).
+Docs-focused round: all docs verified current, future-plans/ roadmap synced.
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL PASS** (30 test binaries, 230+ checkpoints, 0 FAIL)
+- 30 test binaries unchanged (same count since Round 44)
+
+### Code Review — Round 49 (skip: last review was Round 48 on May 10, weekly cadence)
+
+### future-plans/ updates
+- `index.md` — last-updated bumped to 2026-05-11, decision log updated with Round 49 entry.
+
+### Docs check — all current and accurate
+- `integration-guide.md` (499 lines) — API surface unchanged. xlink_read(timeout_ms) signature matches `include/xlink.h`. Wire protocol spec still accurate. No stale examples.
+- `proposal.md` (423 lines) — Implementation status appendix correct: slab (设计讨论), plugin (规划中), async (规划中), TLS (规划中). CLI tools "源码就绪，未加入构建系统".
+- `slab-allocator.md` (273 lines) — still draft, pending benchmark justification. No code changes affect it.
+- `design-decisions.md` — 8 entries all current. #3 (.read vtable: 5 backends fixed, SHM remains) accurate.
+- `known-issues.md` — 5 items, all verified. No new issues.
+- `code-walkthrough.md` (692 lines) — comprehensive, accurate since Round 46.
+- `api.md` (150 lines) — signatures match `include/xlink.h`.
+
+### No content to migrate from next-version-thoughts.md
+All forward-looking content already in `future-plans/`. This file is purely a historical log.
+
+### Remaining known issues (5 items — unchanged since Round 44)
+1. xlink_read() timeout ignored on SHM (by design — no pollable fd)
+2. TCP discard error message edge case (extremely unlikely)
+3. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+4. test_frame_overflow port 19992 fragility (same)
+5. Serial baud 9600 fallback (by design)
+
