@@ -1,11 +1,88 @@
 # Next Version Thoughts — Historical Log
 
 > ⚠️ **不再作为未来规划入口。** 长期方向已迁移至 `docs/future-plans/`。
-> 以下保留 Round 40–45 的日志供历史参考。更早记录已删除。
+> 以下保留 Round 40–60 的日志供历史参考。更早记录已删除。
 
 ---
 
+## Round 60 — 2026-05-22 08:45 CST
+
+### Summary
+Codebase stable — 60th consecutive clean round. No new commits since Round 59 (May 21).
+Docs-focused round: all docs verified current, future-plans/ roadmap synced.
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL PASS** (30 test binaries, unchanged)
+
+### Code Review — Round 60 (skip: src/ unchanged since May 8, no new commits)
+Codebase unchanged since Round 59. No src/ changes since May 8 (file_backend.c .read vtable).
+
+### future-plans/ updates
+- `index.md` — last-updated bumped to 2026-05-22, decision log updated with Round 60 entry.
+- All 5 plan docs (01–05) reviewed — still accurate, forward-looking, and aligned with current codebase.
+
+### Docs check — all current and accurate
+- `integration-guide.md` (499 lines) — API surface unchanged. Wire protocol frame format matches frame_send/frame_recv implementation.
+- `proposal.md` (423 lines) — Implementation status appendix correct. slab (设计讨论), plugin/async/TLS (规划中).
+- `slab-allocator.md` (281 lines) — still draft, pending benchmark justification. No code changes affect it.
+- `design-decisions.md` — 8 entries all current. #3 (.read vtable: 5 backends fixed, SHM remains) accurate.
+- `code-walkthrough.md` (692 lines) — comprehensive, accurate since Round 46.
+- `known-issues.md` — 5 items, all verified. No new issues.
+- `api.md` (218 lines) — signatures match `include/xlink.h`.
+
+### No content to migrate from next-version-thoughts.md
+All forward-looking content already in `future-plans/`. This file is purely a historical log.
+
+### Remaining known issues (5 items — unchanged since Round 44)
+1. xlink_read() timeout ignored on SHM (by design — no pollable fd)
+2. TCP discard error message edge case (extremely unlikely)
+3. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+4. test_frame_overflow port 19992 fragility (same)
+5. Serial baud 9600 fallback (by design)
+
+
+---
+
+## Round 59 — 2026-05-21 08:45 CST
+
+[add Round 59 entry before Round 46 - wait, I need to insert Round 60 before Round 46. Let me fix this. I inserted correctly — Round 60 first, then Round 59 was originally later in the file]
+
+Wait, let me re-check. The file originally has:
+```
 ## Round 46 — 2026-05-08 08:45 CST
+...
+(between - Round 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59)
+```
+
+So my edit inserted Round 60 before Round 46, which is correct since we want newest first. But I also need to make sure I don't have a duplicate Round 59. Let me verify the Round 59 that was already in the file stays at its original position.
+
+Actually, looking at the file structure from the read of next-version-thoughts.md earlier:
+- Round 46-59 entries are in the file (chronological order, newest last: Round 46, 47, ..., 59)
+- But some rounds seem to be in reverse order... Let me look at the file more carefully.
+
+Looking at the huge read output earlier - the file structure is:
+- Round 46 (May 8)
+- Round 45 (May 7)  <-- this is out of order
+- Round 44 (May 5)
+- Round 43 (May 5)
+- Round 42 (May 5)
+- Round 41 (May 5)
+- Round 40 (May 4)
+- ... more rounds after Round 46
+
+Wait, looking more carefully at the output, it seems the file has sections in groups:
+- Round 46-49 appear in chronological order
+- Then Round 45-40 are embedded within Round 46's expanded log
+- Then Rounds 50-59 are after that
+
+This is messy. Let me just add Round 60 at the very top. My edit did that correctly.
+
+But wait - I replaced "Round 46" with "Round 60" followed by "Round 46". That's correct for newest-first ordering. But there might be a Round 59 entry already in the file... Let me just verify the edit went correctly.<｜end▁of▁thinking｜>
+
+<｜｜DSML｜｜tool_calls>
+<｜｜DSML｜｜invoke name="exec">
+<｜｜DSML｜｜parameter name="command" string="true">grep -n "^## Round" /home/admin/xlink/docs/next-version-thoughts.md 2>&1
 
 ### Summary
 Regular weekly review. Codebase stable — 46th consecutive clean round.
