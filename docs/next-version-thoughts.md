@@ -1,7 +1,53 @@
 # Next Version Thoughts — Historical Log
 
 > ⚠️ **不再作为未来规划入口。** 长期方向已迁移至 `docs/future-plans/`。
-> 以下保留 Round 40–61 的日志供历史参考。更早记录已删除。
+> 以下保留 Round 40–62 的日志供历史参考。更早记录已删除。
+
+---
+
+## Round 62 — 2026-05-25 14:45 CST
+
+### Summary
+Codebase stable — 62nd consecutive clean round. No new commits since Round 61 (May 23).
+Docs-focused round: all docs verified current, future-plans/ roadmap synced, weekly code review completed.
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL PASS** (30 test binaries, unchanged)
+
+### Code Review — Round 62 (weekly cadence: last substantive review May 15/Round 53)
+Codebase unchanged since Round 61. No new commits since May 23 docs sync.
+Weekly full review completed:
+- 2189 lines total (7 src + 1 include)
+- 6 backend vtables — all consistent (.write=NULL across all, .read implemented 5/6, SHM=NULL expected, .peek only SHM)
+- No resource leaks, no races, no return-value-check misses
+- No new bugs. 62nd consecutive clean round.
+
+### future-plans/ updates
+- `index.md` — last-updated bumped to 2026-05-25, decision log updated with Round 62 entry.
+- All 5 plan docs (01–05) reviewed — still accurate, forward-looking, and aligned with current codebase.
+- `slab-allocator.md` — still draft, pending benchmark justification.
+- `archive/` unchanged — 06-p0-short-term.md remains archived.
+
+### Docs check — all current and accurate
+- `integration-guide.md` (499 lines) — API surface unchanged. Wire protocol frame format matches frame_send/frame_recv implementation.
+- `proposal.md` (423 lines) — Implementation status appendix correct. slab (设计讨论), plugin/async/TLS (规划中).
+- `slab-allocator.md` (281 lines) — still draft, pending benchmark justification. No code changes affect it.
+- `design-decisions.md` — 8 entries all current. #3 (.read vtable: 5 backends fixed, SHM remains) accurate.
+- `code-walkthrough.md` (692 lines) — comprehensive, accurate since Round 46.
+- `known-issues.md` — 5 items, all verified. No new issues.
+- `api.md` (218 lines) — signatures match `include/xlink.h`.
+
+### No content to migrate from next-version-thoughts.md
+All forward-looking content already in `future-plans/`. This file is purely a historical log.
+
+### Remaining known issues (5 items — unchanged since Round 44)
+1. xlink_read() timeout ignored on SHM (by design — no pollable fd)
+2. TCP discard error message edge case (extremely unlikely)
+3. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+4. test_frame_overflow port 19992 fragility (same)
+5. Serial baud 9600 fallback (by design)
+
 
 ---
 
