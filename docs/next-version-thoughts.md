@@ -5,6 +5,48 @@
 
 ---
 
+## Round 64 — 2026-05-27 14:44 CST
+
+### Summary
+Codebase stable — 64th consecutive clean round. No new commits since Round 63 (May 26).
+Docs-focused round: all docs verified current, future-plans/ roadmap synced, cross-doc consistency checked.
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL PASS** (30 test binaries, 438+ checkpoints)
+
+### Code Review — Round 64 (skip: weekly review completed in Round 62 on May 25)
+Codebase unchanged since Round 63. No new commits since b76e7b5 (Round 63 docs sync).
+src/ unchanged (last real change: May 8/file_backend.c .read vtable).
+
+### future-plans/ updates
+- `index.md` — last-updated bumped to 2026-05-27, decision log updated with Round 64 entry.
+- All 5 plan docs (01–05) reviewed — still accurate, forward-looking, and aligned with current codebase.
+- Cross-doc consistency check: all 5 plan docs' dependency references, interface signatures, and implementation phases are mutually compatible. No inconsistencies found.
+- `archive/` unchanged — 06-p0-short-term.md remains archived.
+
+### Docs check — all current and accurate
+- `integration-guide.md` (499 lines) — API surface unchanged. Wire protocol frame format matches frame_send/frame_recv implementation.
+- `proposal.md` (423 lines) — Implementation status appendix correct. slab (设计讨论), plugin/async/TLS (规划中).
+- `slab-allocator.md` (281 lines) — still draft, pending benchmark justification. No code changes affect it.
+- `design-decisions.md` — 8 entries all current. #3 (.read vtable: 5 backends fixed, SHM remains) accurate.
+- `code-walkthrough.md` (692 lines) — comprehensive, accurate since Round 46.
+- `known-issues.md` — 5 items, all verified. No new issues.
+- `api.md` (218 lines) — signatures match `include/xlink.h`.
+
+### No content to migrate from next-version-thoughts.md
+All forward-looking content already in `future-plans/`. This file is purely a historical log.
+
+### Remaining known issues (5 items — unchanged since Round 44)
+1. xlink_read() timeout ignored on SHM (by design — no pollable fd)
+2. TCP discard error message edge case (extremely unlikely)
+3. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+4. test_frame_overflow port 19992 fragility (same)
+5. Serial baud 9600 fallback (by design)
+
+
+---
+
 ## Round 63 — 2026-05-26 14:44 CST
 
 ### Summary

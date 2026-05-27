@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-05-26
+> 最后更新：2026-05-27
 
 ## 状态总览
 
@@ -117,7 +117,8 @@ SHM atexit 256 ───────── 无依赖
 | 2026-05-22 | 第 60 轮文档审查 | 30 test binaries ALL PASS, 0 警告, 0 bug。第 60 轮连续干净审查。代码库自 Round 59 起无新提交（git log 无变化）。所有 docs 检查通过：future-plans/ 5 个计划文档内容完整准确；slab-allocator.md 保持草案（pending benchmark justification）；integration-guide.md API 签名与 include/xlink.h 一致，Wire Protocol 帧格式与 frame_send/frame_recv 实现一致；proposal.md 实现状态表准确；design-decisions.md 8 项决策均当前有效；known-issues.md 5 项均验证有效；api.md 签名匹配；code-walkthrough.md 架构描述准确。无新增 P0 待实现项。已知问题保持 5 项不变。代码审查跳过（src/ 无变更，最后修改为 May 8/file_backend.c）。 |
 | 2026-05-23 | 第 61 轮文档审查 | 30 test binaries ALL PASS, 0 警告, 0 bug。第 61 轮连续干净审查。代码库自 Round 60 起无新提交（git log 无变化）。src/ 无变更（最后修改 May 8/file_backend.c .read vtable）。所有 7 份 docs 检查通过：future-plans/ 5 个计划文档内容准确完整，向后兼容，与代码现状一致；slab-allocator.md 保持草案（pending benchmark justification）；integration-guide.md（499 行）— API 签名与 include/xlink.h 一致，Wire Protocol 帧格式与实现一致；proposal.md（423 行）— 实现状态表准确，slab/plugin/async/TLS 仍标为"规划中"；design-decisions.md — 8 项决策均当前有效；known-issues.md — 5 项均验证有效；api.md（218 行）— 签名与 include/xlink.h 一致；code-walkthrough.md（692 行）— 架构描述准确（自 Round 46 起）。next-version-thoughts.md 无新内容需迁移（纯历史日志）。无新增 P0 待实现项。已知问题保持 5 项不变。 |
 | 2026-05-25 | 第 62 轮文档审查 + 周度代码复查 | 30 test binaries ALL PASS (所有检查通过), 0 警告, 0 bug。第 62 轮连续干净审查。代码库自 Round 61 起无新提交（git log 无变化）。src/ 无变更（最后修改 May 8/file_backend.c .read vtable）。周度代码复查：2189 行（7 src + 1 include），6 后端 vtable 全部一致（.write=NULL 全统一，.read=实现 5/6 后端，仅 SHM 为 NULL expected，.peek=仅 SHM 实现）。无资源泄漏、无竞态、无返回值检查遗漏。所有 7 份 docs 检查通过：future-plans/ 5 个计划文档内容准确完整（01-05 均与代码现状一致）；slab-allocator.md 保持草案（pending benchmark justification）；integration-guide.md — API 签名与 xlink.h 匹配；proposal.md — 实现状态表准确；design-decisions.md — 8 项决策均当前有效；known-issues.md — 5 项均验证有效；api.md — 签名匹配；code-walkthrough.md — 架构描述准确。next-version-thoughts.md 无新内容需迁移（纯历史日志）。无新增 P0 待实现项。已知问题保持 5 项不变。 |
-| 2026-05-26 | 第 63 轮文档审查 | 30 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 62 起无新提交（git log 无变化，最后提交 c124cc8）。src/ 无变更（最后修改 May 8/file_backend.c .read vtable）。代码审查跳过（本周已于 Round 62 完成）。所有 docs 检查通过：future-plans/ 5 个计划文档内容准确完整、与代码现状一致；slab-allocator.md 保持草案；integration-guide.md — API 签名与 xlink.h 一致；proposal.md — 实现状态表准确；design-decisions.md — 8 项决策均当前有效；known-issues.md — 5 项均验证有效；api.md — 签名匹配；code-walkthrough.md — 架构描述准确。next-version-thoughts.md 无新内容需迁移。无新增 P0 待实现项。已知问题保持 5 项不变。 |
+| 2026-05-26 | 第 63 轮文档审查 | 30 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 62 起无新提交（git log 无变化，最后提交 c124cc8）。src/ 无变更（最后修改 May 8/file_backend.c .read vtable）。代码审查跳过（本周已于 Round 62 完成）。所有 docs 检查通过。无新增 P0。已知问题保持 5 项不变。 |
+| 2026-05-27 | 第 64 轮文档审查 | 30 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 63 起无新提交（git log 无变化，最后 commit b76e7b5）。src/ 无变更（最后修改 May 8/file_backend.c .read vtable）。所有 7 份 docs + 5 份 future-plans/ plan docs 检查通过：内容准确、与代码一致。slab-allocator.md 保持草案（pending benchmark justification）。next-version-thoughts.md 无新内容需迁移（纯历史日志）。无新增 P0 待实现项。已知问题保持 5 项不变。本轮也检查了所有 5 个 plan 文档的跨文档一致性——依赖关系、接口签名、实现路径均互相兼容。 |
 
 ## 相关文档
 
