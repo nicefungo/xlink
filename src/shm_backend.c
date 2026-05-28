@@ -4,6 +4,9 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <time.h>
+#include <stdint.h>
 
 /*
  * SHM backend wraps the existing name-based shm_ipc library.
@@ -95,6 +98,37 @@ static int shm_backend_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     return 0;
 }
 
+static int shm_backend_read(xlink_channel_t* ch, void* buf, size_t len,
+                            int timeout_ms) {
+    shm_priv_t* p = (shm_priv_t*)ch->priv;
+    struct timespec start, now;
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    for (;;) {
+        size_t avail = 0;
+        if (shm_peek(p->name, NULL, &avail) == 0 && avail > 0) {
+            size_t n = len;
+            int rc = shm_read(p->name, buf, &n);
+            if (rc == 0) return (int)n;
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "shm_read(%s): %s", p->name, strerror(errno));
+            return -1;
+        }
+
+        /* Check timeout */
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        int64_t elapsed_ms = (now.tv_sec - start.tv_sec) * 1000
+                           + (now.tv_nsec - start.tv_nsec) / 1000000;
+        if (timeout_ms >= 0 && elapsed_ms >= timeout_ms) {
+            errno = ETIMEDOUT;
+            return -1;
+        }
+
+        usleep(500);  /* 500us poll interval */
+    }
+}
+
 static int shm_backend_peek(xlink_channel_t* ch, size_t* avail) {
     shm_priv_t* p = (shm_priv_t*)ch->priv;
     size_t len;
@@ -114,6 +148,6 @@ const xlink_backend_t xlink_shm_backend = {
     .send  = shm_backend_send,
     .recv  = shm_backend_recv,
     .write = NULL,
-    .read  = NULL,
+    .read  = shm_backend_read,
     .peek  = shm_backend_peek,
 };
