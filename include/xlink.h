@@ -87,6 +87,17 @@ typedef struct xlink_channel xlink_channel_t;
 xlink_channel_t* xlink_open(xlink_type_t type, const char* addr,
                             const xlink_opt_t* opt);
 
+/* Open a channel by URL — auto-detect protocol from scheme.
+ *
+ *   xlink_open_url("shm://mychan", NULL)
+ *   xlink_open_url("tcp://server:8080", &opt)
+ *   xlink_open_url("pipe:///tmp/myfifo", opt_with_create)
+ *
+ * Returns NULL if scheme unknown (check xlink_errstr).
+ */
+xlink_channel_t* xlink_open_url(const char* url,
+                                const xlink_opt_t* opt);
+
 /* Send a framed message (length prefix + payload).
  * Returns 0 on success, -1 on error.
  */

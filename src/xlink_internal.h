@@ -36,6 +36,32 @@ extern const xlink_backend_t xlink_udp_backend;
 extern const xlink_backend_t xlink_file_backend;
 extern const xlink_backend_t xlink_serial_backend;
 
+/* ─── Plugin system ───────────────────────────────────── */
+
+/* Plugin API version — bump when xlink_plugin_t layout changes */
+#define XLINK_PLUGIN_API_VERSION  1
+
+typedef struct xlink_plugin {
+    const char        *name;           /* protocol name, e.g. "mqtt"     */
+    const char        *version;        /* plugin version, e.g. "1.0.0"   */
+    int                api_version;    /* XLINK_PLUGIN_API_VERSION        */
+    xlink_type_t       proto;          /* protocol type ID               */
+    const xlink_backend_t *backend;    /* the backend vtable              */
+
+    /* lifecycle: called once at load / unload */
+    int  (*init)(void);
+    void (*fini)(void);
+
+    void *_reserved[4];
+} xlink_plugin_t;
+
+/* Plugin manager API */
+int  xlink_plugin_register(const xlink_plugin_t *plugin);
+int  xlink_plugin_unregister(const char *name);
+const xlink_plugin_t *xlink_plugin_find(const char *name);
+const xlink_plugin_t *xlink_plugin_find_by_type(xlink_type_t type);
+void xlink_plugins_init(void);
+
 /* ─── Helpers usable by backends ───────────────────────── */
 
 /* Register a SHM name for atexit cleanup.

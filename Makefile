@@ -4,7 +4,7 @@ INCS    = -I include -I third_party/shm_ipc/include
 LDLIBS  = -L third_party/shm_ipc/bin -lshm_ipc -lpthread -lrt
 
 LIB     = bin/libxlink.a
-OBJS    = bin/xlink.o bin/shm_backend.o bin/pipe_backend.o \
+OBJS    = bin/xlink.o bin/plugin.o bin/shm_backend.o bin/pipe_backend.o \
           bin/tcp_backend.o bin/udp_backend.o bin/serial_backend.o bin/file_backend.o
 
 SRCDIR  = src

@@ -11,26 +11,11 @@
 #include <stdio.h>
 
 /* ═══════════════════════════════════════════════════════════
- * Backend registry
+ * Backend registry (via plugin system)
  * ═══════════════════════════════════════════════════════════ */
 
-static const xlink_backend_t* backends[] = {
-    &xlink_shm_backend,
-    &xlink_pipe_backend,
-    &xlink_tcp_backend,
-    &xlink_udp_backend,
-    &xlink_serial_backend,
-    &xlink_file_backend,
-};
-
-#define N_BACKENDS (sizeof(backends) / sizeof(backends[0]))
-
-static const xlink_backend_t* find_backend(xlink_type_t type) {
-    for (size_t i = 0; i < N_BACKENDS; i++)
-        if (backends[i]->type == type)
-            return backends[i];
-    return NULL;
-}
+/* All backends are registered via xlink_plugins_init() in plugin.c.
+ * xlink_open() uses xlink_plugin_find_by_type() to locate backends. */
 
 /* ─── Framing helpers (4-byte big-endian length prefix) ── */
 
@@ -380,7 +365,11 @@ int xlink_wait(xlink_channel_t** chans, int n, int timeout_ms) {
 
 xlink_channel_t* xlink_open(xlink_type_t type, const char* addr,
                             const xlink_opt_t* opt) {
-    const xlink_backend_t* bk = find_backend(type);
+    /* Ensure built-in plugins are registered (lazy init) */
+    xlink_plugins_init();
+
+    const xlink_plugin_t *pl = xlink_plugin_find_by_type(type);
+    const xlink_backend_t *bk = pl ? pl->backend : NULL;
     if (!bk) {
         errno = ENOSYS;
         return NULL;
@@ -452,10 +441,34 @@ const char* xlink_errstr(xlink_channel_t* ch) {
     return ch->errbuf[0] ? ch->errbuf : strerror(errno);
 }
 
+xlink_channel_t* xlink_open_url(const char *url,
+                                const xlink_opt_t *opt) {
+    xlink_plugins_init();
+
+    /* Extract protocol: "proto://rest" → "proto" + "rest" */
+    const char *sep = strstr(url, "://");
+    if (!sep) return NULL;
+
+    size_t proto_len = (size_t)(sep - url);
+    if (proto_len == 0 || proto_len > 31) return NULL;
+
+    char proto[32];
+    memcpy(proto, url, proto_len);
+    proto[proto_len] = '\0';
+
+    const xlink_plugin_t *pl = xlink_plugin_find(proto);
+    if (!pl) {
+        errno = ENOSYS;
+        return NULL;
+    }
+
+    return xlink_open(pl->proto, sep + 3, opt);
+}
+
 const char* xlink_type_str(xlink_type_t t) {
-    for (size_t i = 0; i < N_BACKENDS; i++)
-        if (backends[i]->type == t)
-            return backends[i]->name;
+    xlink_plugins_init();
+    const xlink_plugin_t *pl = xlink_plugin_find_by_type(t);
+    if (pl) return pl->name;
     return "unknown";
 }
 

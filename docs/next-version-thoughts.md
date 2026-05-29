@@ -1,7 +1,66 @@
 # Next Version Thoughts — Historical Log
 
 > ⚠️ **不再作为未来规划入口。** 长期方向已迁移至 `docs/future-plans/`。
-> 以下保留 Round 40–63 的日志供历史参考。更早记录已删除。
+> 以下保留 Round 40–65 的日志供历史参考。更早记录已删除。
+
+---
+
+## Round 65 — 2026-05-28 14:44 CST
+
+### Summary
+Codebase stable — 65th consecutive clean round. The big Round 64 commit (`de67224`) landed
+yesterday: SHM .read vtable, v1.0 technical report, v2.0 roadmap rewrites. This round verifies
+everything post-commit and fixes minor doc inconsistencies.
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **ALL PASS** (30 test binaries, 438+ checkpoints)
+
+### Code Review — Round 65
+Reviewed `de67224` commit (SHM .read vtable implementation, 36 lines added to `src/shm_backend.c`):
+- `shm_backend_read()`: `shm_peek()` polling loop with 500µs `usleep`, `clock_gettime(CLOCK_MONOTONIC)` timeout
+- Same pattern as `xlink_wait()` SHM fallback — consistent
+- Timeout check: `elapsed_ms >= timeout_ms` — correct, handles 0-timeout (instant return)
+- errbuf set on actual `shm_read` failure only — correct (no spurious errors on peek-poll)
+- `clock_gettime` failure unhandled (returns all-zeros → `elapsed_ms` might miscompute) — minor, same
+  pattern exists in `xlink_wait()`. Clock won't fail on Linux unless clock_id is invalid.
+- Now **6/6 backends** implement `.read` vtable. Known issue #1 fully resolved.
+
+**No new bugs found.** 65th consecutive clean round.
+
+### Docs fixes applied this round
+- `design-decisions.md` entry #3 — updated from "Only SHM remains" to "All 6 backends fixed",
+  revised "Why it's hard" to "Why it was hard" with solutions for each backend.
+- `future-plans/index.md` — fixed count inconsistency: "3 项" → "4 项" for remaining issues #3/#4/#5/#6.
+
+### future-plans/ verification
+- `index.md` — all status flags correct. SHM .read now shows as ✅ Fixed. v2.0 (01+02) at 🚧.
+- `01-plugins-arch.md` (285 lines) — complete rewrite from Round 64. Still accurate.
+- `02-async-io.md` (335 lines) — complete rewrite from Round 64. Still accurate.
+- `03-tls-security.md` (114 lines) — unchanged since Round 42. Still forward-looking.
+- `04-performance.md` (112 lines) — unchanged since Round 42.
+- `05-multi-platform.md` (112 lines) — unchanged since Round 42.
+- `archive/06-p0-short-term.md` — unchanged since archive.
+
+### Docs check — all current and accurate
+- `integration-guide.md` (499 lines) — API surface unchanged. Wire protocol accurate.
+- `proposal.md` (423 lines) — Implementation status appendix correct. SHM .read now complete.
+- `slab-allocator.md` (281 lines) — still draft, pending benchmark justification.
+- `design-decisions.md` — entry #3 updated this round. All other entries current.
+- `code-walkthrough.md` (692 lines) — comprehensive, accurate.
+- `known-issues.md` — #1 marked ✅ Fixed. 4 remaining (by-design/minor).
+- `api.md` (218 lines) — signatures match `include/xlink.h`.
+- `technical-report.md` (208 lines) — new in Round 64. Comprehensive v1.0 overview.
+
+### No content to migrate from next-version-thoughts.md
+All forward-looking content already in `future-plans/`. This file is purely a historical log.
+
+### Remaining known issues (4 items — #1 fixed this round)
+3. TCP discard error message edge case (extremely unlikely)
+4. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+5. test_frame_overflow port 19992 fragility (same)
+6. Serial baud 9600 fallback (by design)
+
 
 ---
 

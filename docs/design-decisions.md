@@ -56,15 +56,16 @@ communication errors. If this is a concern, always specify a known rate.
 `.recv()`, which has no timeout parameter. The caller's `timeout_ms` is silently
 ignored and the call blocks indefinitely.
 
-**Status**: ✅ All 5 fd-based backends fixed (TCP, Pipe, Serial, UDP, File). Only SHM remains.
+**Status**: ✅ All 6 backends fixed (2026-05-28). SHM was the last — implements `.read` via
+`shm_peek()` polling (500µs interval) with `clock_gettime(CLOCK_MONOTONIC)` timeout.
 (File: regular files always poll as "ready" on Linux, so timeout is effectively
 ignored — same behavior as the old NULL fallback, but the path is now explicit.)
 
-**Why it's hard to fix for all backends**:
-- SHM has no fd to poll on (relies on `shm_ipc` internal signaling)
-- Pipe and Serial could use poll but need fd extraction from priv struct
-- UDP would work but needs framing translation
-- File I/O doesn't have poll semantics
+**Why it was hard to fix**:
+- SHM has no fd to poll on (relies on `shm_ipc` internal signaling) — solved with peek-polling
+- Pipe and Serial require fd extraction from priv struct — solved with poll() wrapper
+- UDP needs framing translation — solved with recvfrom() poll wrapper
+- File I/O doesn't have poll semantics — solved with poll() as "always ready"
 
 **Workaround**:
 ```c
