@@ -472,6 +472,11 @@ const char* xlink_type_str(xlink_type_t t) {
     return "unknown";
 }
 
+/* Public ⟷ internal plugin bridge */
+size_t xlink_plugin_count(void) {
+    return xlink_plugin_count_impl();
+}
+
 void xlink_dump(xlink_channel_t* ch, int fd) {
     if (!ch) {
         const char* msg = "xlink channel @ (null)\n";

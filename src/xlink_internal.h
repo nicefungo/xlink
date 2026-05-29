@@ -60,7 +60,9 @@ int  xlink_plugin_register(const xlink_plugin_t *plugin);
 int  xlink_plugin_unregister(const char *name);
 const xlink_plugin_t *xlink_plugin_find(const char *name);
 const xlink_plugin_t *xlink_plugin_find_by_type(xlink_type_t type);
+int  xlink_plugin_load(const char *so_path);
 void xlink_plugins_init(void);
+size_t xlink_plugin_count_impl(void);
 
 /* ─── Helpers usable by backends ───────────────────────── */
 

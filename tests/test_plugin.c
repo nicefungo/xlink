@@ -146,6 +146,40 @@ int main(void) {
     ch = xlink_open_url("://noproto", NULL);
     CHECK(ch == NULL, "xlink_open_url(empty-scheme) returns NULL");
 
+    /* ─── xlink_plugin_count() ─── */
+    printf("\n--- Plugin count ---\n");
+    size_t cnt = xlink_plugin_count();
+    CHECK(cnt == 6, "plugin_count() == 6 (built-ins only)");
+
+    /* ─── Dynamic .so loading ─── */
+    printf("\n--- Dynamic .so loading ---\n");
+
+#ifdef __linux__
+    /* Load the mock plugin from .so (build it first) */
+    int ld_rc = xlink_plugin_load("bin/tests/mock_plugin.so");
+    CHECK(ld_rc == 0, "xlink_plugin_load('mock_plugin.so') succeeds");
+
+    pl = xlink_plugin_find("mock");
+    CHECK(pl != NULL, "find 'mock' after load returns non-NULL");
+    CHECK(pl->proto == 16, "loaded mock proto == 16");
+    CHECK(pl->backend != NULL, "loaded mock backend is set");
+
+    cnt = xlink_plugin_count();
+    CHECK(cnt == 7, "plugin_count() == 7 after loading mock");
+
+    /* Load nonexistent .so */
+    ld_rc = xlink_plugin_load("bin/tests/nonexistent.so");
+    CHECK(ld_rc == -1, "xlink_plugin_load(nonexistent) fails");
+
+    /* Unregister after load */
+    int urc = xlink_plugin_unregister("mock");
+    CHECK(urc == 0, "unregister loaded 'mock' succeeds");
+    cnt = xlink_plugin_count();
+    CHECK(cnt == 6, "plugin_count() == 6 after unregister");
+#else
+    printf("  SKIP: .so loading not available on this platform\n");
+#endif
+
     /* ─── xlink_type_str() still works ─── */
     printf("\n--- xlink_type_str() ---\n");
     const char *ts;

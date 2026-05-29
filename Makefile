@@ -21,7 +21,13 @@ $(OBJS): bin/%.o: $(SRCDIR)/%.c
 TEST_SRCS = $(wildcard tests/test_*.c)
 TEST_BINS = $(patsubst tests/%.c, bin/tests/%, $(TEST_SRCS))
 
-tests: lib $(TEST_BINS)
+tests: lib $(TEST_BINS) mock_plugin
+
+bin/tests/mock_plugin.so: tests/mock_plugin.c
+	@mkdir -p bin/tests
+	$(CC) $(CFLAGS) $(INCS) -shared -fPIC -o $@ $<
+
+mock_plugin: bin/tests/mock_plugin.so
 
 bin/tests/%: tests/%.c
 	@mkdir -p bin/tests

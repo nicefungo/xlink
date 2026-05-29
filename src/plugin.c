@@ -8,6 +8,7 @@
  * The registry is initialized lazily on first register/lookup.
  */
 #include "xlink_internal.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -135,4 +136,55 @@ const xlink_plugin_t *xlink_plugin_find_by_type(xlink_type_t type) {
         }
     }
     return NULL;
+}
+
+#ifdef __linux__
+#include <dlfcn.h>
+
+int xlink_plugin_load(const char *so_path) {
+    if (!so_path) return -1;
+
+    void *handle = dlopen(so_path, RTLD_NOW | RTLD_LOCAL);
+    if (!handle) return -1;
+
+    /* Look for exported symbol "xlink_plugin_export" */
+    const xlink_plugin_t *plugin = dlsym(handle, "xlink_plugin_export");
+    if (!plugin) {
+        dlclose(handle);
+        return -1;
+    }
+
+    if (plugin->api_version != XLINK_PLUGIN_API_VERSION) {
+        dlclose(handle);
+        return -1;
+    }
+
+    if (xlink_plugin_register(plugin) != 0) {
+        dlclose(handle);
+        return -1;
+    }
+
+    return 0;
+}
+#endif
+
+void xlink_plugin_list_impl(char *buf, size_t bufsz) {
+    size_t off = 0;
+    for (int i = 0; i < PLUGIN_HASH_BUCKETS && off < bufsz; i++) {
+        for (plugin_entry_t *e = plugin_table[i]; e && off < bufsz; e = e->next) {
+            int n = snprintf(buf + off, bufsz - off, "%s ",
+                             e->plugin->name);
+            if (n < 0) break;
+            off += (size_t)n;
+        }
+    }
+}
+
+size_t xlink_plugin_count_impl(void) {
+    size_t count = 0;
+    for (int i = 0; i < PLUGIN_HASH_BUCKETS; i++) {
+        for (plugin_entry_t *e = plugin_table[i]; e; e = e->next)
+            count++;
+    }
+    return count;
 }

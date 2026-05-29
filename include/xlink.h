@@ -98,6 +98,20 @@ xlink_channel_t* xlink_open(xlink_type_t type, const char* addr,
 xlink_channel_t* xlink_open_url(const char* url,
                                 const xlink_opt_t* opt);
 
+/* ─── Plugin System ───────────────────────────────────── */
+
+/* Load a plugin from a shared library (.so).
+ * The .so must export a symbol named "xlink_plugin_export"
+ * of type xlink_plugin_t.
+ * Returns 0 on success, -1 on error.
+ */
+int xlink_plugin_load(const char *so_path);
+
+/* Return the number of registered plugins (including built-ins). */
+size_t xlink_plugin_count(void);
+
+/* ─── Data Transfer ───────────────────────────────────── */
+
 /* Send a framed message (length prefix + payload).
  * Returns 0 on success, -1 on error.
  */
