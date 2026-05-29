@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-05-28
+> 最后更新：2026-05-29
 
 ## 状态总览
 
@@ -8,12 +8,15 @@
 |------|------|
 | P0 短期改进（3项） | ✅ **全部实现并提交**（Round 44） |
 | 已知问题 #1 (SHM .read timeout) | ✅ **已修复**（2026-05-28） |
-| 已知问题 #2 (SHM 64 cap) | ✅ **已修复**（→256） |
-| 已知问题 #7 (Makefile wildcard) | ✅ **已修复**（自动发现） |
-| 已知问题 #8 (UDP EAGAIN errbuf) | ✅ **已修复**（清晰消息） |
+| v1.0 技术报告 | ✅ **已发布**（`docs/technical-report.md`） |
+| **v2.0 Phase 1: 插件化** | ✅ **已实现**（2026-05-29, `4c7faf7`） |
+| **v2.0 Phase 2: 异步 I/O** | ✅ **已实现**（2026-05-29, `b0e3dac`/`63b0c3d`） |
+| **v2.0 Phase 2: SHM eventfd** | 📝 设计中（`02-async-io-phases.md` 步骤 2.5） |
+| **v2.0 Phase 2: xlink_run()** | 📝 设计中（步骤 2.6） |
+| **v2.0 Phase 2: io_uring** | 📝 设计中（步骤 2.7） |
 | 剩余已知问题 | 4 项 by-design/minor（#3/#4/#5/#6） |
-| **v1.0 技术报告** | ✅ **已发布**（`docs/technical-report.md`） |
-| **v2.0 核心规划** | 🚧 **01 + 02 深化完成**（2026-05-28） |
+| 插件化架构文档 | 🚧 需更新（代码已提交，文档待同步） |
+| 异步 I/O 文档 | 🚧 需更新（代码已提交，文档待同步） |
 
 ## 优先级定义
 
@@ -40,16 +43,22 @@
 
 **v2.0 主题：插件化 + 异步 I/O**
 
-| 计划 | 优先级 | 依赖 | 预计工作量 | 文档 |
-|------|--------|------|-----------|------|
-| 插件化架构 | **P0** | 无 | 约 2 周 | [01-plugins-arch.md](01-plugins-arch.md) |
-| 异步 I/O（io_uring / epoll） | **P0** | 插件化 Phase 1 | 约 2 周 | [02-async-io.md](02-async-io.md) |
+| 计划 | 优先级 | 依赖 | 预计工作量 | 文档 | 代码状态 |
+|------|--------|------|-----------|------|---------|
+| 插件化架构 | **P0** | 无 | ~2 周 | [01-plugins-arch.md](01-plugins-arch.md) | ✅ Phase 1 done (`4c7faf7`) |
+| 异步 I/O（io_uring / epoll） | **P0** | 插件化 Phase 1 | ~2 周 | [02-async-io.md](02-async-io.md) | 🚧 Phase 2 base done (`b0e3dac`, `63b0c3d`) |
+
+**v2.0 实现进度**（2026-05-29）：
+- ✅ Phase 1: `xlink_plugin_load()` / `xlink_open_url()` — `.so` 动态加载，42 checks
+- ✅ Phase 2 基础: epoll/poll 引擎 + `xlink_wait_aio()` — 26 checks
+- ⏳ Phase 2 后续: SHM eventfd, `xlink_run()`, io_uring, 性能基准
+- 32 test binaries, ALL PASS, 0 warnings
 
 **v2.0 核心设计**：
 - 插件化 → 任意协议可通过 `.so` 动态加载，无需修改 xlink 源码
 - 异步引擎 → io_uring（Linux 5.1+）/ epoll 回退，事件驱动替代轮询
 - 两个计划**协同设计**：异步引擎本身也是插件，自动选择最佳实现
-- 完全**向后兼容**：现有代码无需任何修改
+- 完全**向后兼容**：现有代码无需任何修改，`xlink_wait()` 保持不变
 
 ### 近期已完成（v1.0 收尾）
 
@@ -106,6 +115,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-05-29 | v2.0 Phase 1+2 代码提交 | `xlink_plugin_load()` + `.so` 动态加载 (42 checks)；`xlink_wait_aio()` + epoll/poll 引擎 (26 checks)；32 test binaries ALL PASS。plugin/async 从"规划中"进入"实现中"。更新 proposal.md 附录、integration-guide.md 新增 2.6 节、known-issues.md 计数修正 (5→4) |
 | 2026-05-29 | 路线图清理定稿 | 移除 index.md 中重复的 01/02 条目；TLS 提前到 v2.1（与异步 I/O 有依赖，但可并行设计）；性能/跨平台保持在 P2 远期 |
 | 2026-05-28 | v1.0 技术报告发布 | `docs/technical-report.md`，C++ 新手可读，涵盖架构、API、设计哲学 |
 | 2026-05-28 | future-plans/ 深化 | 01（插件化）→完全重写，02（异步 I/O）→完全重写，包含详细 API 签名、实现结构、协同设计说明、性能预期。作为下一版蓝图。 |

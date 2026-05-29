@@ -118,6 +118,46 @@ int my_module_init(const char* peer_addr) {
 }
 ```
 
+### 2.6 v2.0 新功能（实验性）
+
+v2.0 引入了两个新子系统，目前处于实现中状态：
+
+#### 插件化加载（xlink_plugin_load）
+
+```c
+/* 从 .so 文件动态加载后端插件 */
+int xlink_plugin_load(const char *so_path);
+
+/* 查询当前注册的插件数量 */
+size_t xlink_plugin_count(void);
+
+/* 通过 URL 打开通道（自动路由到对应后端） */
+xlink_channel_t* xlink_open_url(const char *url,
+                                 const xlink_opt_t *opt);
+```
+
+URL 格式：`<scheme>://<path>`，例如 `"shm://mychan"` 或 `"tcp://server:8080"`。
+插件需要导出 `xlink_plugin_export` 符号，与内置后端 API 版本匹配。
+
+#### 异步 I/O 引擎（xlink_wait_aio）
+
+```c
+/* 创建异步 I/O 引擎 */
+void *xlink_aio_create(int type);   /* 0=AUTO, 1=POLL, 2=EPOLL */
+
+/* 销毁引擎 */
+void  xlink_aio_destroy(void *engine);
+
+/* 事件驱动版 wait */
+int xlink_wait_aio(xlink_channel_t **chans, int n,
+                   int timeout_ms, void *aio_engine);
+```
+
+引擎通过 `void*` 句柄暴露以实现 ABI 稳定性。当前实现支持 epoll（Linux 2.6+）
+和 poll（POSIX 回退）。`xlink_aio_create(0)` 自动选择最佳可用引擎。
+
+**注意**：这些 API 为实验性，接口可能在未来版本调整。
+
 ---
 
 ## 3. 方案 B：实现 Wire Protocol

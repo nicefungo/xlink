@@ -105,10 +105,10 @@ int xlink_wait_aio(xlink_channel_t **chans, int n,
 ## 4. 当前进度
 
 - [x] 2.1-2.4: 基础引擎实现 + 构建验证
+- [x] 2.8: `test_aio.c` — create/destroy/wait timeout/pipe/SHM/mixed (26 checks)
 - [ ] 2.5: SHM eventfd
 - [ ] 2.6: xlink_run()
 - [ ] 2.7: io_uring
-- [ ] 2.8: 测试
 - [ ] 2.9: 文档
 
 ## 5. 依赖

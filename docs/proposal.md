@@ -418,6 +418,8 @@ make clean && make all && make test
 | RTSP Backend | ⏳ 未实现 | 枚举已预留 |
 | CLI Tools | ⏳ 源码就绪 | 4 个工具（send/recv/bridge/monitor），未加入构建系统 |
 | Slab Allocator | 📝 设计讨论 | 见 `docs/slab-allocator.md` |
-| 插件化架构 | 📝 规划中 | 见 `docs/future-plans/01-plugins-arch.md` |
-| 异步 I/O | 📝 规划中 | 见 `docs/future-plans/02-async-io.md` |
+| 插件化架构 | 🚧 实现中 | Phase 1 done: `.so` 动态加载 + `xlink_open_url()` (2026-05-29) |
+| 异步 I/O | 🚧 实现中 | Phase 2 done: epoll/poll 引擎 + `xlink_wait_aio()` (2026-05-29) |
 | TLS 加密 | 📝 规划中 | 见 `docs/future-plans/03-tls-security.md` |
+| 性能优化 | 📝 规划中 | 见 `docs/future-plans/04-performance.md` |
+| 跨平台支持 | 📝 规划中 | 见 `docs/future-plans/05-multi-platform.md` |

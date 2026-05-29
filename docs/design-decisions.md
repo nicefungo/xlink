@@ -156,3 +156,44 @@ run serially via `make test`.
 - All current users embed xlink in their applications. No shared library
   use cases exist.
 - A shared library build is trivial to add (`-shared -fPIC`) when needed.
+
+## 9. Plugin Architecture: void* Handles for ABI Stability
+
+**Where**: `include/xlink.h` — `xlink_aio_create()`, `xlink_plugin_load()`
+
+**What**: All v2.0 public APIs that wrap internal objects (AIO engines, plugin
+registries) expose `void*` opaque handles rather than typed struct pointers.
+The internal types remain in `src/` headers only.
+
+**Why**:
+- Keeps `xlink.h` ABI-stable: internal struct layout can change without
+  recompiling client code.
+- Users treat handles as opaque tokens — they can't accidentally depend on
+  internal fields.
+- Same pattern used by POSIX (e.g., `pthread_t` is opaque on most platforms).
+
+**Trade-off**: Type safety is deferred to runtime. Passing a wrong handle
+type (e.g., passing a plugin handle to `xlink_wait_aio()`) causes undefined
+behavior rather than a compile error. This is acceptable because the API
+surface is small (~5 new functions) and the handles are used in clearly
+separated contexts.
+
+## 10. epoll as Default Engine, poll as Fallback
+
+**Where**: `src/aio.c` — `xlink_aio_create(0)` auto-detection
+
+**What**: `xlink_aio_create(0)` tries `epoll_create1(EPOLL_CLOEXEC)` first;
+if it fails, falls back to POSIX `poll()`. Users can still explicitly request
+`xlink_aio_create(2)` for epoll or `xlink_aio_create(1)` for poll.
+
+**Why**:
+- epoll is strictly superior for large fd sets — O(1) per event vs O(n) scan.
+- But poll() works on every POSIX system. The fallback means xlink compiles and
+  runs on macOS/BSD without Linux-specific dependencies.
+- Explicit type selection lets advanced users force a particular engine for
+  benchmarking or debugging.
+- io_uring (type=3) is reserved for Phase 2 step 2.7.
+
+**Trade-off**: The auto-detection is purely compile/runtime based on kernel
+support. No configure-time feature detection — intentionally simple for a
+library of this size.

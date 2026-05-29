@@ -1,7 +1,73 @@
 # Next Version Thoughts — Historical Log
 
 > ⚠️ **不再作为未来规划入口。** 长期方向已迁移至 `docs/future-plans/`。
-> 以下保留 Round 40–65 的日志供历史参考。更早记录已删除。
+> 以下保留 Round 40–66 的日志供历史参考。更早记录已删除。
+
+---
+
+## Round 66 — 2026-05-29 14:44 CST
+
+### 🚀 v2.0 里程碑：Phase 1 + Phase 2 代码已提交！
+
+历史性的一轮 — xlink v2.0 的插件化架构和异步 I/O 引擎不再是纸上规划，代码已经落
+地。3 个新提交在今天上午一口气完成：
+
+| 提交 | 内容 | 行数 |
+|------|------|------|
+| `4c7faf7` | Phase 1: `.so` 动态加载 + `xlink_open_url()` | +161 |
+| `b0e3dac` | Phase 2: epoll/poll 引擎 + `xlink_wait_aio()` | +684 |
+| `63b0c3d` | Phase 2: `test_aio.c` (26 checks) | +170 |
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (1 unused function fixed this round)
+- `make test` → **32 test binaries, ALL PASS** (2 new: test_plugin, test_aio)
+- **新增 68 checks**: 42 (plugin) + 26 (aio)
+
+### 新增代码
+- `src/plugin.c` (190 行) — `xlink_plugin_load()` via dlopen/dlsym
+- `src/aio.h` (82 行) — `xlink_aio_t`, `xlink_aio_ops` vtable
+- `src/aio.c` (153 行) — 引擎注册表 + `xlink_wait_aio()`
+- `src/aio_epoll.c` (161 行) — Linux epoll 引擎
+- `src/aio_poll.c` (141 行) — POSIX poll 回退引擎
+- `tests/mock_plugin.c` (47 行) — 可加载 `.so` 测试插件
+- `tests/test_plugin.c` — 42 checks (注册/查找/USER/URL/.so 加载)
+- `tests/test_aio.c` — 26 checks (create/destroy/timeout/pipe/SHM/mixed)
+- `docs/future-plans/02-async-io-phases.md` — 详细实现计划
+
+### v2.0 架构要点
+- 插件通过 `.so` + `xlink_plugin_export` 符号表加载
+- API 版本号校验防止不兼容插件
+- `xlink_open_url("shm://mychan")` 语法糖，自动路由
+- 异步引擎 auto-detect: epoll → poll 回退
+- `void*` handles 保证 ABI 稳定性
+- `xlink_wait()` 完全保留，零破坏现有 API
+
+### Docs 更新
+- `proposal.md` — 实现状态表更新：plugin/async "规划中" → "🚧 实现中"
+- `integration-guide.md` — 新增 §2.6 v2.0 新功能（实验性 API 文档）
+- `design-decisions.md` — 新增 #9 (void* handles) 和 #10 (epoll as default)
+- `future-plans/index.md` — 状态总览更新，新增 Round 66 决策日志
+- `known-issues.md` — 已验证，4 项 by-design/minor 保持不变
+
+### 剩余工作（v2.0 后续）
+- ⏳ SHM eventfd 唤醒（步骤 2.5）
+- ⏳ `xlink_run()` 事件回调（步骤 2.6）
+- ⏳ io_uring 引擎（步骤 2.7）
+- ⏳ `test_aio_perf.c` 性能基准（步骤 2.8）
+- ⏳ 文档同步（步骤 2.9）
+
+### 代码库统计
+- **10 src/ + 2 headers + 32 test binaries** (从 7 src + 30 tests 增长)
+- **~2,896 行 src/** (从 ~2,400 增长 ~500 行)
+- **0 警告**, `-Wall -Wextra -O2 -g`
+- **66 轮连续干净审查**，无 bug
+
+### 剩余已知问题（4 items — #1 fixed Round 65）
+3. TCP discard error message edge case (extremely unlikely)
+4. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+5. test_frame_overflow port 19992 fragility (same)
+6. Serial baud 9600 fallback (by design)
+
 
 ---
 
