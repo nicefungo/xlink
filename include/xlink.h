@@ -152,6 +152,30 @@ void xlink_close(xlink_channel_t* ch);
  */
 int xlink_wait(xlink_channel_t** chans, int n, int timeout_ms);
 
+/* Event-driven multi-channel wait using async engine.
+ *
+ * Like xlink_wait() but uses the given async engine (epoll/io_uring)
+ * instead of poll()+usleep().  Better performance under high concurrency.
+ * Pass NULL for aio to get default engine (auto-select).
+ *
+ * Returns channel index (0..n-1), -1 on timeout, -2 on error.
+ */
+int xlink_wait_aio(xlink_channel_t** chans, int n,
+                   int timeout_ms, void *aio_engine);
+
+/* ─── Async I/O Engine ────────────────────────────────── */
+
+/* Create an async engine.
+ * type: 0 = AUTO, 1 = POLL, 2 = EPOLL, 3 = IO_URING.
+ * Use 0 for automatic selection based on platform. */
+void *xlink_aio_create(int type);
+
+/* Destroy an async engine. */
+void  xlink_aio_destroy(void *engine);
+
+/* Get engine name ("poll", "epoll", "io_uring"). */
+const char *xlink_aio_name(void *engine);
+
 /* ─── Error Reporting ─────────────────────────────────── */
 
 /* Return human-readable string for last error on this channel. */
