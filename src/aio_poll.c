@@ -131,7 +131,7 @@ static int poll_wait_fn(xlink_aio_t *aio, int timeout_ms,
     return -1;
 }
 
-static const struct xlink_aio_ops poll_ops = {
+const struct xlink_aio_ops poll_ops = {
     .name   = "poll",
     .init   = poll_init,
     .fini   = poll_fini,

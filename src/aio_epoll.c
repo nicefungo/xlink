@@ -151,7 +151,7 @@ static int epoll_wait_fn(xlink_aio_t *aio, int timeout_ms,
 
 /* ─── Ops table ───────────────────────────────────────── */
 
-static const struct xlink_aio_ops epoll_ops = {
+const struct xlink_aio_ops epoll_ops = {
     .name   = "epoll",
     .init   = epoll_init,
     .fini   = epoll_fini,
