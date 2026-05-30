@@ -210,16 +210,22 @@ static int shm_backend_send(xlink_channel_t *ch, ...) {
 
 ## 3. 实现路径
 
-### Phase 1: 引擎抽象 + epoll 实现
+> **状态更新（2026-05-30）：步骤 2.1–2.4 + 2.8 已实现 ✅**
+> - `src/aio.h` — 引擎抽象接口（内部）
+> - `src/aio_epoll.c` — Linux epoll 引擎
+> - `src/aio_poll.c` — POSIX poll 引擎（回退）
+> - `src/aio.c` — 引擎管理（create/destroy/auto-detect）
+> - `test_aio.c` — 26 checks，全部通过
+> - 详细实现进度见 [02-async-io-phases.md](02-async-io-phases.md)
 
-**目标**：可工作的异步引擎，涵盖所有 fd-based 后端
+### Phase 1: 引擎抽象 + epoll 实现 ✅ 已完成
 
-- [ ] 实现 `aio.h`：统一引擎接口（`xlink_aio_t` 定义）
-- [ ] 实现 `aio_epoll.c`：epoll 版本引擎
+- [x] 实现 `aio.h`：统一引擎接口（`xlink_aio_t` 定义）
+- [x] 实现 `aio_epoll.c`：epoll 版本引擎
   - `xlink_aio_create(XLINK_AIO_EPOLL)` 创建 epoll 实例
   - `xlink_aio_submit()` 将请求入队 + 注册 epoll 事件
   - `xlink_aio_run()` 事件循环（`epoll_wait` + 执行回调）
-- [ ] 实现 `xlink_wait_aio()`：用 epoll 替代 poll()
+- [x] 实现 `xlink_wait_aio()`：用 epoll 替代 poll()
 - [ ] 基准测试：异步 xlink_wait 对比同步 xlink_wait
 
 **验证**：新测试 `test_aio_epoll`。异步 TCP echo server。

@@ -195,25 +195,27 @@ static pthread_mutex_t plugin_lock = PTHREAD_MUTEX_INITIALIZER;
 
 ## 3. 实现路径
 
-### Phase 1: 最小可行（将内置后端也注册为插件）
+> **状态更新（2026-05-30）：Phase 1 已实现 ✅**
+> - `src/plugin.c` — 插件注册表（register/unregister/find/find_by_type/load/list/count）
+> - `xlink_open_url()` — URL 字符串协议解析
+> - `xlink_plugin_load()` — dlopen + dlsym 动态加载
+> - 42 checks in `test_plugin`，全部通过
 
-**目标**：插件管理器本身可工作，内置后端通过插件机制注册
+### Phase 1: 最小可行（将内置后端也注册为插件）✅ 已完成
 
-- [ ] 实现 `plugin.c`：`xlink_plugin_register()` / `unregister()` / `find()`
-- [ ] 将 6 个内置后端改为插件注册形式（启动时 `init_plugins()` 调用）
-- [ ] 修改 `xlink_open()`：后端查找改为 `xlink_plugin_find_by_type(type)`
-- [ ] 保持 `backends[]` 数组作为 fallback（过渡期兼容）
-- [ ] 测试：注册/查找/注销流程
+- [x] 实现 `plugin.c`：`xlink_plugin_register()` / `unregister()` / `find()`
+- [x] 将 6 个内置后端改为插件注册形式（启动时 `init_plugins()` 调用）
+- [x] 修改 `xlink_open()`：后端查找改为 `xlink_plugin_find_by_type(type)`
+- [x] 保持 `backends[]` 数组作为 fallback（过渡期兼容）
+- [x] 测试：注册/查找/注销流程
 
 **验证**：所有 30 个现有测试仍然通过（内部行为不变）
 
-### Phase 2: URL 模式 + 动态加载
+### Phase 2: URL 模式 + 动态加载 ✅ 已完成
 
-**目标**：支持 `xlink_open_url()` 和 `.so` 动态加载
-
-- [ ] 实现 `xlink_open_url()`：解析 `protocol://` 前缀
-- [ ] 实现 `xlink_plugin_load()`：`dlopen()` → `dlsym("xlink_plugin_export")` → 注册
-- [ ] 实现 `xlink_plugin_list()` 调试接口
+- [x] 实现 `xlink_open_url()`：解析 `protocol://` 前缀
+- [x] 实现 `xlink_plugin_load()`：`dlopen()` → `dlsym("xlink_plugin_export")` → 注册
+- [x] 实现 `xlink_plugin_list()` 调试接口
 - [ ] 编写示例 MQTT 插件（用 mosquitto 库，验证插件机制）
 - [ ] 测试：动态加载、URL 连接、卸载
 

@@ -207,12 +207,61 @@ typedef struct {
 
 ```c
 typedef enum {
-    XLINK_SHM,      /* POSIX shared memory */
-    XLINK_PIPE,     /* Named pipe (FIFO)   */
-    XLINK_TCP,      /* TCP stream          */
-    XLINK_UDP,      /* UDP datagram        */
-    XLINK_SERIAL,   /* Serial port         */
-    XLINK_RTSP,     /* RTSP stream         */
-    XLINK_FILE,     /* File I/O            */
+    XLINK_SHM = 0,          /* POSIX shared memory */
+    XLINK_PIPE = 1,         /* Named pipe (FIFO)   */
+    XLINK_TCP = 2,          /* TCP stream          */
+    XLINK_UDP = 3,          /* UDP datagram        */
+    XLINK_SERIAL = 4,       /* Serial port         */
+    XLINK_RTSP = 5,         /* RTSP stream         */
+    XLINK_FILE = 6,         /* File I/O            */
+    XLINK_USER_BASE = 16,   /* Dynamic plugin IDs  */
 } xlink_type_t;
+```
+
+---
+
+## v2.0 新增 API（实验性）
+
+> 这些 API 已在 v2.0 Phase 1+2 中实现并测试通过（32 test binaries, 0 failures）。
+
+### 插件化加载
+
+```c
+/* URL 字符串解析：自动匹配协议插件 */
+xlink_channel_t *xlink_open_url(const char *url,
+                                const xlink_opt_t *opt);
+
+/* 动态加载 .so 插件（dlopen + dlsym） */
+int xlink_plugin_load(const char *so_path);
+
+/* 获取已注册插件数量 */
+size_t xlink_plugin_count(void);
+```
+
+示例：
+```c
+xlink_channel_t *ch = xlink_open_url("shm://mychan", NULL);
+xlink_plugin_load("./mqtt_plugin.so");
+printf("plugins: %zu\n", xlink_plugin_count());
+```
+
+### 异步 I/O 引擎
+
+```c
+/* 创建异步引擎（0=AUTO, 1=POLL, 2=EPOLL） */
+void *xlink_aio_create(int type);
+void  xlink_aio_destroy(void *engine);
+const char *xlink_aio_name(void *engine);
+
+/* 事件驱动版 xlink_wait（替代轮询） */
+int xlink_wait_aio(xlink_channel_t **chans, int n,
+                   int timeout_ms, void *aio_engine);
+```
+
+示例：
+```c
+void *aio = xlink_aio_create(0);  // 自动选择最佳引擎
+printf("engine: %s\n", xlink_aio_name(aio));
+int ready = xlink_wait_aio(chans, 2, 1000, aio);
+xlink_aio_destroy(aio);
 ```
