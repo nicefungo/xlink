@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-05-30
+> 最后更新：2026-05-31
 
 ## 状态总览
 
@@ -116,6 +116,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-05-31 | 第 68 轮文档审查 + Makefile 修复 | 32 test binaries ALL PASS, 0 warnings。tiny bug: `make test` 执行 mock_plugin.so 导致 segfault — Makefile test 循环未过滤 `.so` 文件。已修复（跳过 `*.so`）。所有 docs 检查通过。future-plans/ 5 份 plan docs 完整准确。known-issues.md 新增 #9（已修复）。next-version-thoughts.md 新增 Round 68 记录。代码审查：src/ 共 10 files / ~3460 行，自 May 29 起无新提交，最后代码变更在 v2.0 Phase 1+2（plugin/aio）。现有 32 test binaries，ALL PASS。剩余 pending: api.md + code-walkthrough.md 补充 v2.0 API 说明（已在 Round 67 标记待办）。 |
 | 2026-05-30 | 第 67 轮文档审计 | 32 test binaries ALL PASS, 0 warnings。修复 index.md 重复 TLS 条目、v2.0 状态标记同步、新增 API 清单。修复 proposal.md 状态表（plugin/async 仍标 🚧，正确）。api.md 及 code-walkthrough.md 待补充 v2.0 API（下次轮次） |
 | 2026-05-29 | v2.0 Phase 1+2 代码提交 | `xlink_plugin_load()` + `.so` 动态加载 (42 checks)；`xlink_wait_aio()` + epoll/poll 引擎 (26 checks)；32 test binaries ALL PASS。plugin/async 从"规划中"进入"实现中"。更新 proposal.md 附录、integration-guide.md 新增 2.6 节、known-issues.md 计数修正 (5→4) |
 | 2026-05-29 | 路线图清理定稿 | 移除 index.md 中重复的 01/02 条目；TLS 提前到 v2.1（与异步 I/O 有依赖，但可并行设计）；性能/跨平台保持在 P2 远期 |

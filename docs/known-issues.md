@@ -82,3 +82,21 @@ New `test_*.c` files are auto-discovered. No Makefile edits needed.
 **Fix**: `udp_backend_recv()` now sets errbuf to `"udp: no data"` instead of
 `"udp recvfrom: Resource temporarily unavailable"` when `recvfrom()` returns
 `EAGAIN` or `EWOULDBLOCK`.
+
+## 9. make test executes mock_plugin.so as a binary
+
+**Status**: ✅ Fixed (Round 68, 2026-05-31)
+
+**Affected code**: `Makefile` — `test` target
+
+**Description**: `make test` iterates `bin/tests/*` and tries to execute every
+file as a binary. Since `mock_plugin.so` is a shared library (not an ELF
+executable), the shell would segfault trying to run it. No test failures, just
+a spurious `Segmentation fault` line in output.
+
+**Fix**: Added `*.so` skip in test loop:
+```makefile
+case "$$t" in *.so) continue ;; esac;
+```
+Also added `|| true` fallback to prevent one test failure from stopping the
+suite — same behavior as before but explicit.
