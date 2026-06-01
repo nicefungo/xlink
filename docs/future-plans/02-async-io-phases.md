@@ -1,7 +1,7 @@
 # xlink v2.0 Phase 2: 异步 I/O 设计文档
 
 > 创建: 2026-05-29 | 依赖: Phase 1 插件化 ✅
-> 预计: ~1 周实现 + 测试
+> v2.0 已发布 (2026-06-01) — 步骤 2.1-2.4 交付。步骤 2.5-2.9 → v2.1
 
 ---
 
@@ -104,12 +104,12 @@ int xlink_wait_aio(xlink_channel_t **chans, int n,
 
 ## 4. 当前进度
 
-- [x] 2.1-2.4: 基础引擎实现 + 构建验证
+- [x] 2.1-2.4: 基础引擎实现 + 构建验证 — **v2.0 已交付**
 - [x] 2.8: `test_aio.c` — create/destroy/wait timeout/pipe/SHM/mixed (26 checks)
-- [ ] 2.5: SHM eventfd
-- [ ] 2.6: xlink_run()
-- [ ] 2.7: io_uring
-- [ ] 2.9: 文档
+- [ ] 2.5: SHM eventfd → **v2.1**
+- [ ] 2.6: xlink_run() → **v2.1**
+- [ ] 2.7: io_uring → **v2.1**
+- [ ] 2.9: 文档 → **v2.1**
 
 ## 5. 依赖
 

@@ -1,7 +1,24 @@
 # Next Version Thoughts — Historical Log
 
 > ⚠️ **不再作为未来规划入口。** 长期方向已迁移至 `docs/future-plans/`。
-> 以下保留 Round 40–69 的日志供历史参考。更早记录已删除。
+> 以下保留 Round 40–70 的日志供历史参考。更早记录已删除。
+
+---
+
+## Round 70 — 2026-06-01 18:14 CST
+
+### v2.0 正式发布
+
+**Decision**: 3 天/4 轮审查 0 代码变更，达成稳定标准。v2.0 已发布（tag `v2.0`）。
+
+**v2.0 交付**:
+- Phase 1: 插件化架构 — `.so` 动态加载 + `xlink_open_url()` (42 checks)
+- Phase 2: epoll/poll 引擎 + `xlink_wait_aio()` (26 checks)
+- 32 test binaries, ALL PASS, 0 warnings
+
+**推迟到 v2.1**: SHM eventfd (2.5), xlink_run() (2.6), io_uring (2.7), 性能基准 (2.8)
+
+**v2.1 路线图**: 异步 I/O 深化 + TLS 加密
 
 ---
 

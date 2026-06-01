@@ -9,13 +9,8 @@
 | P0 短期改进（3项） | ✅ **全部实现并提交**（Round 44） |
 | 已知问题 #1 (SHM .read timeout) | ✅ **已修复**（2026-05-28） |
 | v1.0 技术报告 | ✅ **已发布**（`docs/technical-report.md`） |
-| **v2.0 Phase 1: 插件化** | ✅ **已实现**（2026-05-29, `4c7faf7`） |
-| **v2.0 Phase 2: 异步 I/O 基础** | ✅ **已实现**（2026-05-29, `b0e3dac`/`63b0c3d`） |
-| **v2.0 Phase 2 后续: SHM eventfd** | 📝 设计中（`02-async-io-phases.md` 步骤 2.5） |
-| **v2.0 Phase 2 后续: xlink_run()** | 📝 设计中（步骤 2.6） |
-| **v2.0 Phase 2 后续: io_uring** | 📝 设计中（步骤 2.7） |
+| **🆕 v2.0: 插件化 + 异步 I/O** | ✅ **已发布**（2026-06-01, tag `v2.0`） |
 | 剩余已知问题 | 4 项 by-design/minor（#3/#4/#5/#6） |
-| 现有文档（proposal/api/code-walkthrough） | 🚧 code-walkthrough.md 已补充 v2.0 章节（Round 69） |
 
 ## 优先级定义
 
@@ -38,29 +33,34 @@
 | UDP NONBLOCK 清晰 errbuf | ✅ Done | `4e04816` |
 | SHM atexit cleanup 扩至 256 | ✅ Done | `0d13a4d` |
 
-### 近期（P0 — 下一版本：v2.0）
+### ✅ v2.0 — 已发布（2026-06-01）
 
-**v2.0 主题：插件化 + 异步 I/O**
+**tag: `v2.0`** · 主题：插件化 + 异步 I/O
 
-| 计划 | 优先级 | 依赖 | 预计工作量 | 文档 | 代码状态 |
-|------|--------|------|-----------|------|---------|
-| 插件化架构 | **P0** | 无 | ✅ Done | [01-plugins-arch.md](01-plugins-arch.md) | ✅ Phase 1 done (`4c7faf7`, `0ffc5a5`) |
-| 异步 I/O 基础（epoll/poll） | **P0** | 插件化 Phase 1 | ✅ Done | [02-async-io.md](02-async-io.md) | ✅ Phase 2 base done (`b0e3dac`, `63b0c3d`) |
-| 异步 I/O 后续（eventfd/io_uring） | **P0** | 异步基础 | ~1 周 | [02-async-io-phases.md](02-async-io-phases.md) | ⏳ 步骤 2.5–2.9 进行中 |
+| 计划 | 状态 | 提交 |
+|------|------|------|
+| 插件化架构（Phase 1） | ✅ | `4c7faf7`, `0ffc5a5` |
+| 异步 I/O 基础（Phase 2） | ✅ | `b0e3dac`, `63b0c3d` |
 
-**v2.0 实现进度**（2026-05-30）：
-- ✅ Phase 1: `xlink_plugin_load()` / `xlink_open_url()` — `.so` 动态加载，42 checks
-- ✅ Phase 2 基础: epoll/poll 引擎 + `xlink_wait_aio()` — 26 checks
-- ⏳ Phase 2 后续: SHM eventfd (2.5), `xlink_run()` (2.6), io_uring (2.7), 性能基准 (2.8)
+**v2.0 交付清单**：
+- `xlink_plugin_load()` / `xlink_open_url()` — `.so` 动态加载，42 checks
+- `xlink_wait_aio()` / `xlink_aio_create()` — epoll/poll 引擎，26 checks
+- 新增 4 个源文件: `src/plugin.c`, `src/aio.c`, `src/aio_epoll.c`, `src/aio_poll.c`
 - 32 test binaries, ALL PASS, 0 warnings
-- 新增 3 个源文件: `src/plugin.c`, `src/aio.c`, `src/aio_epoll.c`, `src/aio_poll.c`
-- 新增公共 API: `xlink_open_url()`, `xlink_plugin_load()`, `xlink_wait_aio()`, `xlink_aio_create()`
+- 完全向后兼容，`xlink_wait()` 保持不变
+- 文档：code-walkthrough.md §16-17，integration-guide.md §2.6
 
-**v2.0 核心设计**：
-- 插件化 → 任意协议可通过 `.so` 动态加载，无需修改 xlink 源码
-- 异步引擎 → io_uring（Linux 5.1+）/ epoll 回退，事件驱动替代轮询
-- 两个计划**协同设计**：异步引擎本身也是插件，自动选择最佳实现
-- 完全**向后兼容**：现有代码无需任何修改，`xlink_wait()` 保持不变
+### 近期（P0 — 下一版本：v2.1）
+
+**v2.1 主题：异步 I/O 深化 + TLS 加密**
+
+| 计划 | 优先级 | 依赖 | 预计工作量 | 文档 | 状态 |
+|------|--------|------|-----------|------|------|
+| SHM eventfd 唤醒 | **P0** | v2.0 | 小（~1天） | [02-async-io-phases.md](02-async-io-phases.md) | 📝 设计中 |
+| xlink_run() 事件回调 | **P0** | v2.0 | 中（~2天） | [02-async-io-phases.md](02-async-io-phases.md) | 📝 设计中 |
+| io_uring 引擎 | **P0** | v2.0 | 中（~3天） | [02-async-io-phases.md](02-async-io-phases.md) | 📝 设计中 |
+| 性能基准测试 | **P0** | eventfd/io_uring | 中 | [02-async-io-phases.md](02-async-io-phases.md) | 📝 设计中 |
+| TLS 加密通信层 | **P1** | v2.1 async 完成 | 大（~3周） | [03-tls-security.md](03-tls-security.md) | 📝 设计中 |
 
 ### 近期已完成（v1.0 收尾）
 
@@ -72,17 +72,16 @@
 | test_read_timeout 验证 | ✅ Done | `0331ba6` |
 | code-walkthrough.md 架构文档 | ✅ Done | `279b8e0` |
 
-### 中期（P1 — v2.1）
+### 中期（P1 — v2.2+）
 
 | 计划 | 优先级 | 依赖 | 预计工作量 |
 |------|--------|------|-----------|
-| TLS 加密通信层 | P1 | 异步 I/O | 大（~3周） |
+| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） |
 
 ### 远期（P2 — v3.0+）
 
 | 计划 | 优先级 | 依赖 | 预计工作量 |
 |------|--------|------|-----------|
-| 性能优化（zero-copy、批量化） | P2 | 异步 I/O | 中（~1周） |
 | 跨平台支持 | P2 | 插件化架构 | 极大（~2月） |
 
 ## 依赖关系图
@@ -97,25 +96,33 @@ UDP EAGAIN errbuf ────── 无依赖
 SHM atexit 256 ───────── 无依赖
 SHM .read timeout ────── 无依赖（2026-05-28）
           │
-    ——— v2.0 核心 ———
+    ——— v2.0 已发布 ———
           │
           ▼
     插件化架构 ─────────┐
           │             │
           ▼             ▼
-    异步 I/O ──────── TLS 加密
-     (io_uring)         (依赖异步 I/O)
+    epoll/poll 引擎 ──  (done)
           │
-          ├────────── 性能优化 (zero-copy)
+    ——— v2.1 (进行中) ———
           │
-          └────────── 跨平台支持
-                        (依赖插件化架构)
+          ├── SHM eventfd 唤醒
+          ├── xlink_run() 回调
+          ├── io_uring 引擎
+          └── 性能基准测试
+          │
+          ▼
+       TLS 加密 ──────── 性能优化
+                           (zero-copy)
+          │
+          └── 跨平台支持
 ```
 
 ## 决策日志
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-06-01 | **v2.0 正式发布** | 32 test binaries ALL PASS, 0 warnings。Phase 1+2 已交付核心承诺（插件化 + 事件驱动引擎）。步骤 2.5-2.7（SHM eventfd, xlink_run, io_uring）推迟到 v2.1。3 天/4 轮审查 0 代码变更，达成稳定标准。tag `v2.0` 已打。 |
 | 2026-06-01 | 第 69 轮文档审查 + code-walkthrough v2.0 补充 | 32 test binaries ALL PASS, 0 warnings。code-base unchanged since May 29 (v2.0 Phase 1+2 commits)。**code-walkthrough.md 补充了 §16（插件化架构）和 §17（异步 I/O 引擎）**，覆盖 plugin 注册表 hash table、aio 引擎 vtable、epoll/poll 实现、xlink_wait_aio 内部流程和剩余步骤。这部分自 Round 67 就是待办项，现已完成。所有 other docs 检查通过：integration-guide.md §2.6 v2.0 内容准确、proposal.md 状态表正确、slab-allocator.md 保持草案、design-decisions.md 10 项决策均当前有效、known-issues.md 4 项剩余未变（#9 已 fix）、api.md v2.0 API 签名与 xlink.h 一致。next-version-thoughts.md 无新内容需迁移（纯历史日志）。代码审查跳过（src/ 无变更，本周审查上周 Round 68 已完成）。无新增 P0。|
 | 2026-05-30 | 第 67 轮文档审计 | 32 test binaries ALL PASS, 0 warnings。修复 index.md 重复 TLS 条目、v2.0 状态标记同步、新增 API 清单。修复 proposal.md 状态表（plugin/async 仍标 🚧，正确）。api.md 及 code-walkthrough.md 待补充 v2.0 API（下次轮次） |
 | 2026-05-29 | v2.0 Phase 1+2 代码提交 | `xlink_plugin_load()` + `.so` 动态加载 (42 checks)；`xlink_wait_aio()` + epoll/poll 引擎 (26 checks)；32 test binaries ALL PASS。plugin/async 从"规划中"进入"实现中"。更新 proposal.md 附录、integration-guide.md 新增 2.6 节、known-issues.md 计数修正 (5→4) |
