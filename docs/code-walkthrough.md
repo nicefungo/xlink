@@ -2,9 +2,10 @@
 
 For experienced engineers who want to understand the full architecture.
 
-> **Last updated:** 2026-05-07
-> **Lines of code:** ~2,500 across 7 backend + 1 core + 4 tools + 30 test files
+> **Last updated:** 2026-06-01
+> **Lines of code:** ~3,460 across 10 src + 2 headers + 32 test files
 > **External dependency:** `libshm_ipc.a` (SHM backend only)
+> **v2.0 additions:** `src/plugin.c`, `src/aio.c`, `src/aio_epoll.c`, `src/aio_poll.c`
 
 ---
 
@@ -16,6 +17,10 @@ xlink/
 ├── src/
 │   ├── xlink.c              — Core dispatch: vtable routing, framing, xlink_wait, SHM cleanup
 │   ├── xlink_internal.h     — Internal shared types: xlink_backend_t vtable, xlink_channel_t
+│   ├── plugin.c             — Plugin registry: register/unregister/find/load (v2.0)
+│   ├── aio.c                — Async I/O engine management (v2.0)
+│   ├── aio_epoll.c          — Linux epoll engine (v2.0)
+│   ├── aio_poll.c           — POSIX poll fallback engine (v2.0)
 │   ├── shm_backend.c        — SHM backend: wraps shm_ipc library (name-based shared memory)
 │   ├── pipe_backend.c       — Pipe backend: POSIX FIFO (named pipe)
 │   ├── tcp_backend.c        — TCP backend: multi-client server + auto-reconnect client
@@ -627,7 +632,128 @@ Total: ~3-4 changes, ~100-150 lines.
 
 ---
 
-## 16. Document Cross-Reference
+## 16. v2.0: Plugin Architecture (`src/plugin.c`)
+
+Added 2026-05-29. Enables dynamic backend loading via `.so` files (dlopen).
+
+### 16.1 Plugin Registry
+
+A hash table (32 buckets, djb2 hash, chained linked lists) stores all
+registered plugins. Protected by `pthread_mutex_t` for thread safety.
+
+```
+plugin_table[32]
+  bucket[0] → plugin_entry("shm")  → NULL
+  bucket[5] → plugin_entry("tcp")  → plugin_entry("pipe") → NULL
+  ...
+```
+
+### 16.2 Key Functions
+
+| Function | Role |
+|----------|------|
+| `xlink_plugin_register()` | Add a built-in or loaded plugin to the registry |
+| `xlink_plugin_find(name)` | Lookup by string name (djb2 hash → chain walk) |
+| `xlink_plugin_find_by_type(type)` | Lookup by protocol type ID (linear scan) |
+| `xlink_plugin_load(so_path)` | dlopen a `.so`, dlsym `xlink_plugin_export`, register it |
+| `xlink_plugin_count()` | Return number of registered plugins |
+| `xlink_open_url(url, opt)` | Parse `scheme://path` → find plugin → call `plugin->open()` |
+
+### 16.3 .so Plugin Contract
+
+Plugins must export exactly one symbol:
+```c
+const xlink_plugin_t xlink_plugin_export;
+```
+
+The `xlink_plugin_t` struct includes `api_version` (currently 1) for ABI
+compatibility checking. If the plugin's version doesn't match xlink's
+`XLINK_PLUGIN_API_VERSION`, loading is refused.
+
+Dynamic plugin protocol type IDs start at `XLINK_USER_BASE = 16`, keeping
+0–6 reserved for built-in backends.
+
+### 16.4 Built-in Backend Registration
+
+On startup, `init_plugins()` in `src/xlink.c` registers all 6 built-in
+backends (SHM/PIPE/TCP/UDP/SERIAL/FILE) as plugins via
+`xlink_plugin_register()`. This means `xlink_open(type, ...)` and
+`xlink_open_url("shm://...", ...)` go through the same code path.
+
+---
+
+## 17. v2.0: Async I/O Engine (`src/aio*.c`)
+
+Added 2026-05-29. Replaces polling `xlink_wait()` with event-driven I/O.
+
+### 17.1 Engine Architecture
+
+```
+xlink_aio_create(type) → engine instance (opaque void*)
+  │
+  ├── type=AUTO(0) → try epoll_create1() → success → epoll engine
+  │                  → failure → poll engine (POSIX fallback)
+  ├── type=EPOLL(2) → epoll engine only
+  ├── type=POLL(1)  → poll engine only
+  └── type=IO_URING(3) → reserved (future)
+```
+
+### 17.2 Engine vtable (`src/aio.h` — internal)
+
+```c
+typedef struct xlink_aio_ops {
+    int  (*watch)(xlink_aio_t *aio, int fd, void *ch);
+    int  (*unwatch)(xlink_aio_t *aio, int fd);
+    int  (*wait)(xlink_aio_t *aio, int timeout_ms,
+                 int *out_fd, void **out_user);
+    void (*destroy)(xlink_aio_t *aio);
+} xlink_aio_ops_t;
+```
+
+### 17.3 epoll Engine (`src/aio_epoll.c`)
+
+- `watch()`: `epoll_ctl(EPOLL_CTL_ADD)` with `EPOLLIN`
+- `unwatch()`: `epoll_ctl(EPOLL_CTL_DEL)`
+- `wait()`: `epoll_wait()` → return one ready fd + user data pointer
+- Thread-safe with `pthread_rwlock_t` on the fd→channel map
+
+### 17.4 poll Engine (`src/aio_poll.c`)
+
+POSIX fallback. Maintains a dynamic `struct pollfd[]` array. `watch()` adds
+fd + events, `unwatch()` compacts the array, `wait()` calls `poll()`.
+
+### 17.5 Public API Integration
+
+```c
+// Create engine (0=AUTO, 1=POLL, 2=EPOLL)
+void *xlink_aio_create(int type);
+void  xlink_aio_destroy(void *engine);
+
+// Event-driven alternative to xlink_wait()
+int xlink_wait_aio(xlink_channel_t **chans, int n,
+                   int timeout_ms, void *aio_engine);
+```
+
+`xlink_wait_aio()` internally:
+1. Registers all channel fds with the engine via `watch()`
+2. Calls `engine->wait(timeout_ms)` to block until data arrives
+3. Returns the ready channel index (same semantics as `xlink_wait()`)
+4. For SHM channels (no fd), falls back to a short `usleep(5000)` + `peek()`
+   loop — this is the last remaining polling path. Future versions will
+   replace it with eventfd (step 2.5 in `02-async-io-phases.md`).
+
+### 17.6 Remaining Steps
+
+| Step | Status | Description |
+|------|--------|-------------|
+| 2.5 SHM eventfd | 📝 Planned | Replace shm peek polling with eventfd notification |
+| 2.6 xlink_run() | 📝 Planned | Event-driven main loop with callback |
+| 2.7 io_uring | 📝 Planned | Kernel-level async I/O (Linux 5.1+) |
+| 2.9 Docs | 📝 This file | code-walkthrough v2.0 sections |
+
+---
+
+## 18. Document Cross-Reference
 
 | Document | What it covers | Read when |
 |----------|---------------|-----------|
@@ -635,7 +761,7 @@ Total: ~3-4 changes, ~100-150 lines.
 | `integration-guide.md` | Third-party module integration via libxlink or wire protocol | Adding a new consumer |
 | `proposal.md` | Original design, architecture overview, status per component | Historical context |
 | `design-decisions.md` | 8 intentional design choices with rationale | Questioning "why" |
-| `known-issues.md` | 5 remaining known issues (was 8, 3 fixed) | Pre-deployment review |
+| `known-issues.md` | 4 remaining known issues (3-6), 5 fixed (1/2/7/8/9) | Pre-deployment review |
 | `slab-allocator.md` | Proposed slab allocator for channel_t + priv (draft) | Performance tuning |
 | `future-plans/index.md` | Roadmap: P0/P1/P2, dependency graph, decision log | Strategic planning |
 | `future-plans/01-plugins-arch.md` | Dynamic backend loading via dlopen | Next gen architecture |

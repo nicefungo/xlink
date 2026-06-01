@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-05-31
+> 最后更新：2026-06-01
 
 ## 状态总览
 
@@ -15,7 +15,7 @@
 | **v2.0 Phase 2 后续: xlink_run()** | 📝 设计中（步骤 2.6） |
 | **v2.0 Phase 2 后续: io_uring** | 📝 设计中（步骤 2.7） |
 | 剩余已知问题 | 4 项 by-design/minor（#3/#4/#5/#6） |
-| 现有文档（proposal/api/code-walkthrough） | 🚧 待同步 v2.0 新增 API |
+| 现有文档（proposal/api/code-walkthrough） | 🚧 code-walkthrough.md 已补充 v2.0 章节（Round 69） |
 
 ## 优先级定义
 
@@ -116,7 +116,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
-| 2026-05-31 | 第 68 轮文档审查 + Makefile 修复 | 32 test binaries ALL PASS, 0 warnings。tiny bug: `make test` 执行 mock_plugin.so 导致 segfault — Makefile test 循环未过滤 `.so` 文件。已修复（跳过 `*.so`）。所有 docs 检查通过。future-plans/ 5 份 plan docs 完整准确。known-issues.md 新增 #9（已修复）。next-version-thoughts.md 新增 Round 68 记录。代码审查：src/ 共 10 files / ~3460 行，自 May 29 起无新提交，最后代码变更在 v2.0 Phase 1+2（plugin/aio）。现有 32 test binaries，ALL PASS。剩余 pending: api.md + code-walkthrough.md 补充 v2.0 API 说明（已在 Round 67 标记待办）。 |
+| 2026-06-01 | 第 69 轮文档审查 + code-walkthrough v2.0 补充 | 32 test binaries ALL PASS, 0 warnings。code-base unchanged since May 29 (v2.0 Phase 1+2 commits)。**code-walkthrough.md 补充了 §16（插件化架构）和 §17（异步 I/O 引擎）**，覆盖 plugin 注册表 hash table、aio 引擎 vtable、epoll/poll 实现、xlink_wait_aio 内部流程和剩余步骤。这部分自 Round 67 就是待办项，现已完成。所有 other docs 检查通过：integration-guide.md §2.6 v2.0 内容准确、proposal.md 状态表正确、slab-allocator.md 保持草案、design-decisions.md 10 项决策均当前有效、known-issues.md 4 项剩余未变（#9 已 fix）、api.md v2.0 API 签名与 xlink.h 一致。next-version-thoughts.md 无新内容需迁移（纯历史日志）。代码审查跳过（src/ 无变更，本周审查上周 Round 68 已完成）。无新增 P0。|
 | 2026-05-30 | 第 67 轮文档审计 | 32 test binaries ALL PASS, 0 warnings。修复 index.md 重复 TLS 条目、v2.0 状态标记同步、新增 API 清单。修复 proposal.md 状态表（plugin/async 仍标 🚧，正确）。api.md 及 code-walkthrough.md 待补充 v2.0 API（下次轮次） |
 | 2026-05-29 | v2.0 Phase 1+2 代码提交 | `xlink_plugin_load()` + `.so` 动态加载 (42 checks)；`xlink_wait_aio()` + epoll/poll 引擎 (26 checks)；32 test binaries ALL PASS。plugin/async 从"规划中"进入"实现中"。更新 proposal.md 附录、integration-guide.md 新增 2.6 节、known-issues.md 计数修正 (5→4) |
 | 2026-05-29 | 路线图清理定稿 | 移除 index.md 中重复的 01/02 条目；TLS 提前到 v2.1（与异步 I/O 有依赖，但可并行设计）；性能/跨平台保持在 P2 远期 |
@@ -160,3 +160,5 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 - [跨平台支持](05-multi-platform.md)
 - [代码审查记录](/home/admin/xlink/docs/next-version-thoughts.md)
 - [已知问题](/home/admin/xlink/docs/known-issues.md)
+- [API 参考](/home/admin/xlink/docs/api.md)
+- [代码走读](/home/admin/xlink/docs/code-walkthrough.md)

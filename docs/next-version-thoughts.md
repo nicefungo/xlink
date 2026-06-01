@@ -1,7 +1,55 @@
 # Next Version Thoughts — Historical Log
 
 > ⚠️ **不再作为未来规划入口。** 长期方向已迁移至 `docs/future-plans/`。
-> 以下保留 Round 40–68 的日志供历史参考。更早记录已删除。
+> 以下保留 Round 40–69 的日志供历史参考。更早记录已删除。
+
+---
+
+## Round 69 — 2026-06-01 14:44 CST
+
+### Summary
+Codebase stable — 69th consecutive clean round. Main deliverable: code-walkthrough.md
+now includes v2.0 plugin and aio architecture chapters (Round 67/68 TODO completed).
+
+### Build & Test
+- `make clean && make all` → **0 warnings** (`-Wall -Wextra -O2 -g`)
+- `make test` → **32 test binaries, ALL PASS**
+
+### code-walkthrough.md v2.0 update (Round 67/68 TODO ✅)
+Added two new chapters:
+- **§16 — Plugin Architecture**: hash table registry (32 buckets, djb2),
+  plugin lifecycle (register/find/load), .so contract (xlink_plugin_export),
+  xlink_open_url() URL scheme routing, built-in backend auto-registration.
+- **§17 — Async I/O Engine**: engine vtable design, epoll vs poll fallback
+  strategy, xlink_wait_aio() internal flow (watch→wait→return index), SHM
+  polling path (remaining to-do: eventfd), remaining steps (2.5–2.9).
+
+Also updated: file layout listing (added plugin.c/aio*.c), line count
+(2,500→3,460), known-issues reference (5→4 remaining), and last-updated
+date.
+
+### Docs check — all current and accurate
+- `integration-guide.md` — §2.6 v2.0 content accurate, API signatures match
+- `proposal.md` — Implementation status appendix correct (plugin/async 🚧)
+- `slab-allocator.md` — still draft, pending benchmark justification
+- `design-decisions.md` — 10 entries all current
+- `known-issues.md` — 4 remaining (#3/#4/#5/#6), 5 fixed
+- `api.md` — v2.0 API signatures match include/xlink.h
+- `code-walkthrough.md` — NOW covers v2.0 architecture ✅
+- `future-plans/` — 5 plan docs all accurate, index.md updated
+
+### No content to migrate from next-version-thoughts.md
+All forward-looking content already in future-plans/. This file is purely historical.
+
+### Remaining known issues (4 items)
+3. TCP discard error message edge case (extremely unlikely)
+4. test_tcp_overflow_client port 19897 fragility (serial execution mitigates)
+5. test_frame_overflow port 19992 fragility (same)
+6. Serial baud 9600 fallback (by design)
+
+### Code review skipped
+Last full review: Round 68. No src/ changes since May 29 (v2.0 Phase 1+2 commits).
+Next weekly review due: Round 70+.
 
 ---
 
