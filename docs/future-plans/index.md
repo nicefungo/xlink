@@ -122,6 +122,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-06-06 | 第 72 轮周期审查 | 32 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 71 起无新提交。src/ 无变更（跳过代码审查）。所有 docs 检查通过：future-plans/ 5 个计划文档准确，index.md 路线图与代码现状一致。known-issues.md 4 项剩余（#3-#6）均为 by-design/minor。design-decisions.md 10 项决策均当前有效。v2.1 P0 项（SHM eventfd、xlink_run、io_uring、性能基准）仍在设计中，无代码进展。无新增 P0。 |
 | 2026-06-04 | 第 71 轮周期审查 | 32 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 70 起无新提交。v2.0 发布后进入稳定期（连续 3 天零变更）。src/ 无变更（跳过代码审查）。所有 docs 检查通过：future-plans/ 5 个计划文档准确，index.md 路线图与代码现状一致。known-issues.md 4 项剩余（#3-#6）均为 by-design/minor。design-decisions.md 10 项决策均当前有效。v2.1 P0 项（SHM eventfd、xlink_run、io_uring、性能基准）仍在设计中，无代码进展。无新增 P0。 |
 | 2026-06-01 | **v2.0 正式发布** | 32 test binaries ALL PASS, 0 warnings。Phase 1+2 已交付核心承诺（插件化 + 事件驱动引擎）。步骤 2.5-2.7（SHM eventfd, xlink_run, io_uring）推迟到 v2.1。3 天/4 轮审查 0 代码变更，达成稳定标准。tag `v2.0` 已打。 |
 | 2026-06-01 | 第 69 轮文档审查 + code-walkthrough v2.0 补充 | 32 test binaries ALL PASS, 0 warnings。code-base unchanged since May 29 (v2.0 Phase 1+2 commits)。**code-walkthrough.md 补充了 §16（插件化架构）和 §17（异步 I/O 引擎）**，覆盖 plugin 注册表 hash table、aio 引擎 vtable、epoll/poll 实现、xlink_wait_aio 内部流程和剩余步骤。这部分自 Round 67 就是待办项，现已完成。所有 other docs 检查通过：integration-guide.md §2.6 v2.0 内容准确、proposal.md 状态表正确、slab-allocator.md 保持草案、design-decisions.md 10 项决策均当前有效、known-issues.md 4 项剩余未变（#9 已 fix）、api.md v2.0 API 签名与 xlink.h 一致。next-version-thoughts.md 无新内容需迁移（纯历史日志）。代码审查跳过（src/ 无变更，本周审查上周 Round 68 已完成）。无新增 P0。|
