@@ -122,6 +122,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-06-07 | 第 73 轮周期审查 | 32 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 72 起无新提交。src/ 无变更（跳过代码审查）。所有 docs 检查通过：future-plans/ 5 个计划文档准确，index.md 路线图与代码现状一致。known-issues.md 4 项剩余（#3-#6）均为 by-design/minor。design-decisions.md 10 项决策均当前有效。v2.1 P0 项（SHM eventfd、xlink_run、io_uring、性能基准）仍在设计中，无代码进展。无新增 P0。 |
 | 2026-06-06 | 第 72 轮周期审查 | 32 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 71 起无新提交。src/ 无变更（跳过代码审查）。所有 docs 检查通过：future-plans/ 5 个计划文档准确，index.md 路线图与代码现状一致。known-issues.md 4 项剩余（#3-#6）均为 by-design/minor。design-decisions.md 10 项决策均当前有效。v2.1 P0 项（SHM eventfd、xlink_run、io_uring、性能基准）仍在设计中，无代码进展。无新增 P0。 |
 | 2026-06-04 | 第 71 轮周期审查 | 32 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 70 起无新提交。v2.0 发布后进入稳定期（连续 3 天零变更）。src/ 无变更（跳过代码审查）。所有 docs 检查通过：future-plans/ 5 个计划文档准确，index.md 路线图与代码现状一致。known-issues.md 4 项剩余（#3-#6）均为 by-design/minor。design-decisions.md 10 项决策均当前有效。v2.1 P0 项（SHM eventfd、xlink_run、io_uring、性能基准）仍在设计中，无代码进展。无新增 P0。 |
 | 2026-06-01 | **v2.0 正式发布** | 32 test binaries ALL PASS, 0 warnings。Phase 1+2 已交付核心承诺（插件化 + 事件驱动引擎）。步骤 2.5-2.7（SHM eventfd, xlink_run, io_uring）推迟到 v2.1。3 天/4 轮审查 0 代码变更，达成稳定标准。tag `v2.0` 已打。 |
