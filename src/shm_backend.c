@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 /*
  * SHM backend wraps the existing name-based shm_ipc library.
@@ -20,14 +22,55 @@
  *   shm_destroy(name)             — unlink & cleanup
  *
  * xlink convention:
- *   XLINK_CREATE → init segment
+ *   XLINK_CREATE → init segment + eventfd FIFO
  *   no XLINK_CREATE → just read/write (segment must exist)
  *   close does NOT destroy (caller manages lifetime)
+ *
+ * 通知机制 (v2.1: step 2.5 — SHM eventfd):
+ *   每个 SHM channel 配对一个命名 FIFO (/tmp/xlink-evt-<name>)。
+ *   发送端写完 SHM 后打开 FIFO 写入 1 字节通知信号。
+ *   接收端在 epoll 中监听 FIFO 的读端 → 唤醒后 peek SHM。
+ *   这消除了 xlink_wait_aio() 中 SHM 通道的 usleep() 轮询。
  */
 
+#define FIFO_PREFIX "/tmp/xlink-evt-"
+
 typedef struct {
-    char name[64];
+    char   name[64];
+    int    fifo_created;   /* did we create the FIFO? (only on CREATE) */
 } shm_priv_t;
+
+/* Build FIFO path from SHM name */
+static void fifo_path(const char *name, char *out, size_t out_sz) {
+    snprintf(out, out_sz, "%s%s", FIFO_PREFIX, name);
+}
+
+/* Open FIFO for read, non-blocking. Returns fd or -1. */
+static int fifo_open_reader(const char *name) {
+    char path[128];
+    fifo_path(name, path, sizeof(path));
+
+    int fd = open(path, O_RDWR | O_NONBLOCK);
+    if (fd < 0) {
+        /* FIFO not created yet by sender — that's OK for non-CREATE opens */
+        return -1;
+    }
+    return fd;
+}
+
+/* Write 1-byte notification to the FIFO (sender side).
+ * Opens O_WRONLY | O_NONBLOCK, writes, closes. */
+static void fifo_notify(const char *name) {
+    char path[128];
+    fifo_path(name, path, sizeof(path));
+
+    int fd = open(path, O_WRONLY | O_NONBLOCK);
+    if (fd < 0) return;  /* reader not ready yet — no-op */
+    uint8_t c = 1;
+    ssize_t nw = write(fd, &c, 1);
+    (void)nw;  /* best-effort */
+    close(fd);
+}
 
 static int shm_backend_open(xlink_channel_t* ch, const char* addr,
                             const xlink_opt_t* opt) {
@@ -54,15 +97,39 @@ static int shm_backend_open(xlink_channel_t* ch, const char* addr,
         }
         /* Register for atexit cleanup */
         xlink_register_shm_cleanup(p->name);
+
+        /* Create notification FIFO */
+        char path[128];
+        fifo_path(p->name, path, sizeof(path));
+        unlink(path);  /* clean stale FIFO if any */
+        if (mkfifo(path, 0666) == 0) {
+            p->fifo_created = 1;
+        }
     }
 
+    /* Open FIFO for read — epoll will watch this fd */
+    ch->fd = fifo_open_reader(p->name);
     ch->priv = p;
     return 0;
 }
 
 static void shm_backend_close(xlink_channel_t* ch) {
     if (!ch->priv) return;
-    /* Don't destroy — caller manages lifetime */
+    shm_priv_t* p = (shm_priv_t*)ch->priv;
+
+    if (ch->fd >= 0) {
+        close(ch->fd);
+        ch->fd = -1;
+    }
+
+    /* Only the creator unlinks the FIFO */
+    if (p->fifo_created) {
+        char path[128];
+        fifo_path(p->name, path, sizeof(path));
+        unlink(path);
+    }
+
+    /* Don't destroy SHM segment — caller manages lifetime */
     free(ch->priv);
     ch->priv = NULL;
 }
@@ -74,6 +141,8 @@ static int shm_backend_send(xlink_channel_t* ch, const void* data, size_t len) {
                  "shm_write(%s): %s", p->name, strerror(errno));
         return -1;
     }
+    /* Notify reader(s) via FIFO */
+    fifo_notify(p->name);
     return 0;
 }
 

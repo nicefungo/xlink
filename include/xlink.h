@@ -163,6 +163,26 @@ int xlink_wait(xlink_channel_t** chans, int n, int timeout_ms);
 int xlink_wait_aio(xlink_channel_t** chans, int n,
                    int timeout_ms, void *aio_engine);
 
+/* ─── Event-Driven Main Loop ──────────────────────────── */
+
+/* Callback signature for xlink_run().
+ * Called when data arrives on a channel.  ch_idx is the index into
+ * the channels[] array passed to xlink_run().  arg is the user_data
+ * pointer from the xlink_run() call.
+ *
+ * Return 0 to continue the loop, non-zero to break out. */
+typedef int (*xlink_callback_t)(xlink_channel_t **chans, int n,
+                                int ch_idx, void *arg);
+
+/* Run an event-driven main loop: wait on channels via the async engine,
+ * call cb(chans, n, ch_idx, arg) each time data arrives.
+ *
+ * Returns 0 when the loop exits normally (callback returned non-zero),
+ * -1 on timeout (if timeout_ms > 0), -2 on error. */
+int xlink_run(xlink_channel_t **chans, int n,
+              int timeout_ms, void *aio_engine,
+              xlink_callback_t cb, void *arg);
+
 /* ─── Async I/O Engine ────────────────────────────────── */
 
 /* Create an async engine.

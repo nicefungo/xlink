@@ -106,8 +106,9 @@ int xlink_wait_aio(xlink_channel_t **chans, int n,
 
 - [x] 2.1-2.4: 基础引擎实现 + 构建验证 — **v2.0 已交付**
 - [x] 2.8: `test_aio.c` — create/destroy/wait timeout/pipe/SHM/mixed (26 checks)
-- [ ] 2.5: SHM eventfd → **v2.1**
+- [x] 2.5: SHM eventfd → **v2.1** ✅ (shm_backend.c FIFO + aio.c drain/verify, test_aio.c 35/35 PASS)
 - [ ] 2.6: xlink_run() → **v2.1**
+- [x] 2.6: xlink_run() → **v2.1** ✅ (aio.c event loop + peek stale detection, test_run.c 24/24 PASS)
 - [ ] 2.7: io_uring → **v2.1**
 - [ ] 2.9: 文档 → **v2.1**
 

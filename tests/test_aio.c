@@ -122,6 +122,59 @@ int main(void) {
     xlink_close(shm_tx);
     xlink_close(shm_rx);
 
+    /* ─── SHM FIFO notification verification ─── */
+    printf("\n--- SHM FIFO notification ---\n");
+
+    shm_tx = xlink_open(XLINK_SHM, "test_evfd", &opt);
+    shm_rx = xlink_open(XLINK_SHM, "test_evfd", &XLINK_OPT_DEFAULT);
+
+    CHECK(shm_tx != NULL, "fifo: SHM tx open");
+    CHECK(shm_rx != NULL, "fifo: SHM rx open");
+
+    /* Verify FIFO wiring: xlink_wait_aio with SHM-only
+     * should work with short timeout (no polling loop). */
+    {
+        xlink_channel_t *ev_chans[1] = { shm_rx };
+        rc = xlink_wait_aio(ev_chans, 1, 50, aio);
+        CHECK(rc == -1, "fifo: timeout on empty SHM (no polling)");
+    }
+
+    /* After send, wait_aio should return via FIFO notification */
+    xlink_send(shm_tx, "evfd_data", 10);
+    {
+        xlink_channel_t *ev_chans[1] = { shm_rx };
+        rc = xlink_wait_aio(ev_chans, 1, 500, aio);
+        CHECK(rc == 0, "fifo: wake on data — wait_aio returns index 0");
+        len = 256;
+        xlink_recv(shm_rx, buf, &len);
+        CHECK(strcmp(buf, "evfd_data") == 0, "fifo: data matches");
+    }
+
+    /* Multi-send: each send must be consumed before next send
+     * (shm_ipc broadcast mode: shm_writen blocks until all readers
+     *  consume previous message). */
+    xlink_send(shm_tx, "m1", 3);
+    {
+        xlink_channel_t *ev_chans[1] = { shm_rx };
+        rc = xlink_wait_aio(ev_chans, 1, 500, aio);
+        CHECK(rc == 0, "fifo: multi-send m1 wakes");
+        len = 256;
+        xlink_recv(shm_rx, buf, &len);
+        CHECK(strcmp(buf, "m1") == 0, "fifo: first msg 'm1'");
+    }
+    xlink_send(shm_tx, "m2", 3);
+    {
+        xlink_channel_t *ev_chans[1] = { shm_rx };
+        rc = xlink_wait_aio(ev_chans, 1, 500, aio);
+        CHECK(rc == 0, "fifo: multi-send m2 wakes");
+        len = 256;
+        xlink_recv(shm_rx, buf, &len);
+        CHECK(strcmp(buf, "m2") == 0, "fifo: second msg 'm2'");
+    }
+
+    xlink_close(shm_tx);
+    xlink_close(shm_rx);
+
     /* ─── Mixed SHM + Pipe wait ─── */
     printf("\n--- Mixed SHM + Pipe wait ───\n");
 
