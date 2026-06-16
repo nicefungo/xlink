@@ -16,6 +16,7 @@ extern const struct xlink_aio_ops poll_ops;
 
 #ifdef __linux__
 extern const struct xlink_aio_ops epoll_ops;
+extern const struct xlink_aio_ops uring_ops;
 #endif
 
 /* ─── Engine creation ─────────────────────────────────── */
@@ -25,6 +26,15 @@ xlink_aio_t *xlink_aio_create_impl(xlink_aio_type_t type) {
     if (!aio) return NULL;
 
 #ifdef __linux__
+    if (type == XLINK_AIO_IOURING) {
+        aio->ops = &uring_ops;
+        if (aio->ops->init(aio) == 0) {
+            aio->type = XLINK_AIO_IOURING;
+            return aio;
+        }
+        /* io_uring failed — fall through to epoll */
+        type = XLINK_AIO_EPOLL;
+    }
     if (type == XLINK_AIO_EPOLL || type == XLINK_AIO_AUTO) {
         aio->ops = &epoll_ops;
         if (aio->ops->init(aio) == 0) {
@@ -34,7 +44,8 @@ xlink_aio_t *xlink_aio_create_impl(xlink_aio_type_t type) {
         /* epoll failed — fall through to poll */
     }
 #else
-    (void)epoll_ops;  /* suppress unused warning */
+    (void)epoll_ops;
+    (void)uring_ops;  /* suppress unused warnings */
 #endif
 
     /* Default: POSIX poll */

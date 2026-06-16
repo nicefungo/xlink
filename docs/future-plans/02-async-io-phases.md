@@ -110,6 +110,7 @@ int xlink_wait_aio(xlink_channel_t **chans, int n,
 - [ ] 2.6: xlink_run() → **v2.1**
 - [x] 2.6: xlink_run() → **v2.1** ✅ (aio.c event loop + peek stale detection, test_run.c 24/24 PASS)
 - [ ] 2.7: io_uring → **v2.1**
+- [x] 2.7: io_uring → **v2.1** ✅ (aio_uring.c raw syscall impl, aio.c registry, 0 warnings, all tests pass)
 - [ ] 2.9: 文档 → **v2.1**
 
 ## 5. 依赖
