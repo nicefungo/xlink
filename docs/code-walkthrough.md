@@ -2,10 +2,11 @@
 
 For experienced engineers who want to understand the full architecture.
 
-> **Last updated:** 2026-06-01
-> **Lines of code:** ~3,460 across 10 src + 2 headers + 32 test files
+> **Last updated:** 2026-06-17
+> **Lines of code:** ~3,750 across 11 src + 2 headers + 32 test files
 > **External dependency:** `libshm_ipc.a` (SHM backend only)
 > **v2.0 additions:** `src/plugin.c`, `src/aio.c`, `src/aio_epoll.c`, `src/aio_poll.c`
+> **v2.1 additions:** `src/aio_uring.c`, eventfd in SHM, `xlink_run()` event loop
 
 ---
 
@@ -21,6 +22,7 @@ xlink/
 │   ├── aio.c                — Async I/O engine management (v2.0)
 │   ├── aio_epoll.c          — Linux epoll engine (v2.0)
 │   ├── aio_poll.c           — POSIX poll fallback engine (v2.0)
+│   ├── aio_uring.c          — io_uring engine, raw syscall (v2.1)
 │   ├── shm_backend.c        — SHM backend: wraps shm_ipc library (name-based shared memory)
 │   ├── pipe_backend.c       — Pipe backend: POSIX FIFO (named pipe)
 │   ├── tcp_backend.c        — TCP backend: multi-client server + auto-reconnect client
@@ -746,14 +748,99 @@ int xlink_wait_aio(xlink_channel_t **chans, int n,
 
 | Step | Status | Description |
 |------|--------|-------------|
-| 2.5 SHM eventfd | 📝 Planned | Replace shm peek polling with eventfd notification |
-| 2.6 xlink_run() | 📝 Planned | Event-driven main loop with callback |
-| 2.7 io_uring | 📝 Planned | Kernel-level async I/O (Linux 5.1+) |
-| 2.9 Docs | 📝 This file | code-walkthrough v2.0 sections |
+| 2.5 SHM eventfd | ✅ v2.1 | Replace shm peek polling with eventfd notification |
+| 2.6 xlink_run() | ✅ v2.1 | Event-driven main loop with callback |
+| 2.7 io_uring | ✅ v2.1 | Kernel-level async I/O (Linux 5.1+) |
+| 2.9 Docs | ✅ v2.1 | This file updated |
 
 ---
 
-## 18. Document Cross-Reference
+## 18. v2.1: Async I/O Deepening
+
+### 18.1 SHM eventfd Wake-up (`src/shm_backend.c`)
+
+v2.0 used `usleep(5000)` + `peek()` polling for SHM channels in
+`xlink_wait_aio()` — the last remaining polling path. v2.1 replaces this
+with an eventfd-based notification:
+
+- `shm_backend.c` creates a per-channel `eventfd(0, EFD_NONBLOCK)` during
+  `open()` and stores the fd in the channel's private data.
+- On `send()`, the backend writes 8 bytes to the eventfd to signal the
+  receiver.
+- `xlink_wait_aio()` registers the eventfd in epoll alongside channel fds.
+  On wake-up, it drains the eventfd (reads 8 bytes) and peeks SHM to verify
+  data availability.
+- `close()` releases the eventfd.
+
+This eliminates the 5ms polling latency entirely — SHM delivery is now
+truly event-driven with sub-millisecond wake-up.
+
+### 18.2 xlink_run() Event Loop (`src/aio.c`)
+
+```c
+int xlink_run(xlink_channel_t **chans, int n,
+              void *aio_engine,
+              void (*callback)(int idx, void *arg),
+              void *arg, int timeout_ms);
+```
+
+A production-ready event loop that replaces the manual `while(1) { wait;
+process }` pattern:
+
+1. If `aio_engine` is NULL, auto-creates an epoll engine (and destroys it
+   on exit).
+2. Iterates `wait_aio()` → calls `callback(idx, arg)` for each ready
+   channel.
+3. Returns normally on callback returning non-zero, or -1 on timeout/error.
+4. Stale detection: if `wait_aio()` returns an index but SHM peek shows no
+   data (spurious eventfd wake-up), the loop skips the callback and
+   continues.
+5. 24 checks in `test_run.c` covering single/multi-event, timeout, auto-
+   engine creation, and error cases.
+
+### 18.3 io_uring Engine (`src/aio_uring.c`)
+
+Linux 5.1+ kernel-level async I/O via raw syscall interface — zero external
+dependencies (no `liburing`).
+
+```c
+#define XLINK_AIO_IOURING 3  // in xlink.h
+```
+
+**Architecture:**
+- `aio_uring_create()`: calls `io_uring_setup(256, &params)` directly via
+  `syscall(__NR_io_uring_setup, ...)`.
+- Submission ring (SQ) and completion ring (CQ) mapped via `mmap()`.
+- `watch(fd)`: adds the fd to an internal array; the actual SQE submission
+  happens in `wait()`.
+- `wait()`: submits `IORING_OP_READ` SQEs for all watched fds, then calls
+  `io_uring_enter(min_complete=1, ...)` to block until at least one CQE
+  arrives. Returns the index of the ready fd.
+- `destroy()`: unmaps SQ/CQ rings and closes the ring fd.
+
+**Engine registration** in `aio.c`:
+- `xlink_aio_create(XLINK_AIO_IOURING)` → creates the uring engine.
+- `xlink_aio_create(AUTO)` still prefers epoll (io_uring requires Linux
+  5.1+, which is not yet universal).
+
+**Key design decisions:**
+- Raw syscall interface keeps the library zero-dependency.
+- SQE submission is batched in `wait()` — we don't submit on every `watch()`
+  because the poll loop pattern is "watch many, wait once".
+- The engine supports up to 256 concurrent fds (configurable via
+  `IO_URING_ENTRIES` define).
+
+### 18.4 Integration Summary
+
+| Component | Source | Public API | Tests |
+|-----------|--------|------------|-------|
+| SHM eventfd | `src/shm_backend.c` | internal | `test_aio.c` (35 checks) |
+| xlink_run() | `src/aio.c` | `xlink_run()` | `test_run.c` (24 checks) |
+| io_uring | `src/aio_uring.c` | `xlink_aio_create(3)` | `test_aio.c` (compat) |
+
+---
+
+## 19. Document Cross-Reference
 
 | Document | What it covers | Read when |
 |----------|---------------|-----------|

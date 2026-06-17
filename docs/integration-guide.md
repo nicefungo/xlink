@@ -143,7 +143,7 @@ URL 格式：`<scheme>://<path>`，例如 `"shm://mychan"` 或 `"tcp://server:80
 
 ```c
 /* 创建异步 I/O 引擎 */
-void *xlink_aio_create(int type);   /* 0=AUTO, 1=POLL, 2=EPOLL */
+void *xlink_aio_create(int type);   /* 0=AUTO, 1=POLL, 2=EPOLL, 3=IO_URING */
 
 /* 销毁引擎 */
 void  xlink_aio_destroy(void *engine);
@@ -151,10 +151,20 @@ void  xlink_aio_destroy(void *engine);
 /* 事件驱动版 wait */
 int xlink_wait_aio(xlink_channel_t **chans, int n,
                    int timeout_ms, void *aio_engine);
+
+/* 事件驱动主循环 */
+int xlink_run(xlink_channel_t **chans, int n,
+              void *aio_engine,
+              void (*callback)(int idx, void *arg),
+              void *arg, int timeout_ms);
 ```
 
-引擎通过 `void*` 句柄暴露以实现 ABI 稳定性。当前实现支持 epoll（Linux 2.6+）
-和 poll（POSIX 回退）。`xlink_aio_create(0)` 自动选择最佳可用引擎。
+引擎通过 `void*` 句柄暴露以实现 ABI 稳定性。当前实现支持 epoll（Linux 2.6+）、
+poll（POSIX 回退）和 io_uring（Linux 5.1+）。`xlink_aio_create(0)` 自动选择
+最佳可用引擎（epoll 优先）。
+
+`xlink_run()` 提供开箱即用的事件循环：自动创建 epoll 引擎、等待事件、
+为每个就绪 channel 调用回调函数。适用于经典的生产者-消费者模式。
 
 **注意**：这些 API 为实验性，接口可能在未来版本调整。
 
