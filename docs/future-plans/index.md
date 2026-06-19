@@ -124,6 +124,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-06-19 | 第 89 轮周期审查 — v2.1 稳定维护 | make all 0 警告，make test 32/32 套件全部通过。代码库自 Round 88 起无新提交。v2.1 全部 5 个步骤（2.5-2.9）均已交付，仅剩性能基准测试。所有 docs 检查通过：known-issues 4 项 by-design/minor 不变，design-decisions 均有效，future-plans 5 个计划文档准确。无新增 P0。 |
 | 2026-06-18 | 第 88 轮周期审查 — v2.1 全部完工 | make all 0 警告，make test 32/32 套件全部通过。v2.1 全部 5 个步骤（2.5 SHM eventfd、2.6 xlink_run、2.7 io_uring、2.8 测试、2.9 文档）均已交付。index.md 路线图状态同步。src/ 无新变更，代码库稳定。仅剩性能基准测试（P0 设计中）。 |
 | 2026-06-17 | 步骤 2.9 文档更新完成 | code-walkthrough.md 新增 §18（v2.1 async deepening: eventfd, xlink_run, io_uring），integration-guide.md 更新 xlink_aio_create 签名（新增 IO_URING=3）和 xlink_run()，02-async-io-phases.md 标记 2.9 完成。make all 0 警告，make test 32/32 套件全部通过。v2.1 全部 5 个步骤（2.5-2.9）交付完毕，仅剩性能基准测试。 |
 | 2026-06-16 | 步骤 2.7 io_uring 引擎实现 | 新增 `src/aio_uring.c`（~290行），raw syscall 接口，零外部依赖。`aio.c` 引擎注册表支持 `XLINK_AIO_IOURING` 类型。`make all` 0 警告，`make test` 20/20 套件全部通过。v2.1 剩余：步骤 2.8 性能基准测试 + 步骤 2.9 文档更新。 |
