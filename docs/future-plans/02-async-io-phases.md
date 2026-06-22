@@ -108,9 +108,7 @@ int xlink_wait_aio(xlink_channel_t **chans, int n,
 - [x] 2.8: `test_aio.c` — create/destroy/wait timeout/pipe/SHM/mixed (26 checks)
 - [x] 2.8: `test_aio_perf.c` — 6 benchmarks (poll/epoll/uring latency+throughput+SHM+multi) ✅
 - [x] 2.5: SHM eventfd → **v2.1** ✅ (shm_backend.c FIFO + aio.c drain/verify, test_aio.c 35/35 PASS)
-- [ ] 2.6: xlink_run() → **v2.1**
 - [x] 2.6: xlink_run() → **v2.1** ✅ (aio.c event loop + peek stale detection, test_run.c 24/24 PASS)
-- [ ] 2.7: io_uring → **v2.1**
 - [x] 2.7: io_uring → **v2.1** ✅ (aio_uring.c raw syscall impl, aio.c registry, 0 warnings, all tests pass)
 - [x] 2.9: 文档更新 → **v2.1** ✅ (code-walkthrough.md §18, integration-guide.md 更新)
 
