@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-06-17
+> 最后更新：2026-06-22
 
 ## 状态总览
 
@@ -59,7 +59,7 @@
 | SHM eventfd 唤醒 | **P0** | v2.0 | 小（~1天） | [02-async-io-phases.md](02-async-io-phases.md) | ✅ 已实现 |
 | xlink_run() 事件回调 | **P0** | v2.0 | 中（~2天） | [02-async-io-phases.md](02-async-io-phases.md) | ✅ 已实现 |
 | io_uring 引擎 | **P0** | v2.0 | 中（~3天） | [02-async-io-phases.md](02-async-io-phases.md) | ✅ 已实现 |
-| 性能基准测试 | **P0** | eventfd/io_uring | 中 | [02-async-io-phases.md](02-async-io-phases.md) | 📝 设计中 |
+| 性能基准测试 | **P0** | eventfd/io_uring | 中 | [06-perf-benchmarks.md](06-perf-benchmarks.md) | ✅ 已完成 |
 | 文档更新 | **P0** | 所有 async 步骤完成 | 中 | [02-async-io-phases.md](02-async-io-phases.md) | ✅ 已更新 |
 | TLS 加密通信层 | **P1** | v2.1 async 完成 | 大（~3周） | [03-tls-security.md](03-tls-security.md) | 📝 设计中 |
 
@@ -105,12 +105,12 @@ SHM .read timeout ────── 无依赖（2026-05-28）
           ▼             ▼
     epoll/poll 引擎 ──  (done)
           │
-    ——— v2.1 (进行中) ———
+    ——— v2.1 (完成) ———
           │
           ├── SHM eventfd 唤醒 ✅
           ├── xlink_run() 回调 ✅
           ├── io_uring 引擎 ✅
-          ├── 性能基准测试
+          ├── 性能基准测试 ✅
           └── 文档更新 ✅
           │
           ▼
@@ -124,6 +124,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-06-22 | 性能基准测试完成 + io_uring bug 修复 | `test_aio_perf.c` 6 个基准全部通过。修复 `aio_uring.c` 的 POLL_REMOVE CQE 泄漏 bug（`uring_unwatch` 中使用 `user_data=0` 哨兵 + 立即 drain）。新增 `docs/future-plans/06-perf-benchmarks.md` 基准报告。结果：poll 0.004ms/3515MB/s（Pipe 场景最快），epoll 0.007ms/3060MB/s，io_uring 0.004ms/3003MB/s。SHM 0.032ms，多通道 0.012ms。v2.1 全部 P0 项完成，代码库 0 warnings，32 test binaries ALL PASS。 |
 | 2026-06-19 | 第 89 轮周期审查 — v2.1 稳定维护 | make all 0 警告，make test 32/32 套件全部通过。代码库自 Round 88 起无新提交。v2.1 全部 5 个步骤（2.5-2.9）均已交付，仅剩性能基准测试。所有 docs 检查通过：known-issues 4 项 by-design/minor 不变，design-decisions 均有效，future-plans 5 个计划文档准确。无新增 P0。 |
 | 2026-06-18 | 第 88 轮周期审查 — v2.1 全部完工 | make all 0 警告，make test 32/32 套件全部通过。v2.1 全部 5 个步骤（2.5 SHM eventfd、2.6 xlink_run、2.7 io_uring、2.8 测试、2.9 文档）均已交付。index.md 路线图状态同步。src/ 无新变更，代码库稳定。仅剩性能基准测试（P0 设计中）。 |
 | 2026-06-17 | 步骤 2.9 文档更新完成 | code-walkthrough.md 新增 §18（v2.1 async deepening: eventfd, xlink_run, io_uring），integration-guide.md 更新 xlink_aio_create 签名（新增 IO_URING=3）和 xlink_run()，02-async-io-phases.md 标记 2.9 完成。make all 0 警告，make test 32/32 套件全部通过。v2.1 全部 5 个步骤（2.5-2.9）交付完毕，仅剩性能基准测试。 |

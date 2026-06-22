@@ -107,7 +107,7 @@ done:
 
 /* ─── Benchmark 3: Pipe throughput (32KB bulk) ─── */
 static int bench_pipe_throughput(void) {
-    banner("Pipe throughput — bulk 32KB (epoll vs poll)");
+    banner("Pipe throughput — bulk 32KB (poll vs epoll vs io_uring)");
 
     xlink_channel_t *tx = xlink_open(XLINK_PIPE, "/tmp/xlink_perf_bulk", &opt_create);
     xlink_channel_t *rx = xlink_open(XLINK_PIPE, "/tmp/xlink_perf_bulk", &opt_default);
@@ -123,10 +123,11 @@ static int bench_pipe_throughput(void) {
     char *buf = malloc(bufsz);
     memset(buf, 'X', bufsz);
     int nrounds = 50;
+    double t0, t1, mbps;
 
     /* Poll engine */
     void *aio_poll = xlink_aio_create(1);
-    double t0 = now_ms();
+    t0 = now_ms();
     for (int i = 0; i < nrounds; i++) {
         xlink_send(tx, buf, bufsz);
         xlink_channel_t *chans[] = {rx};
@@ -134,9 +135,9 @@ static int bench_pipe_throughput(void) {
         size_t len = bufsz;
         xlink_recv(rx, buf, &len);
     }
-    double t1 = now_ms();
-    double poll_mbps = (nrounds * bufsz / (1024.0 * 1024.0)) / ((t1 - t0) / 1000.0);
-    printf("  Poll:  %.1f MB/s (%.1f ms for %dx %zuKB)\n", poll_mbps, t1 - t0, nrounds, bufsz/1024);
+    t1 = now_ms();
+    mbps = (nrounds * bufsz / (1024.0 * 1024.0)) / ((t1 - t0) / 1000.0);
+    printf("  Poll:     %.1f MB/s (%.1f ms for %dx %zuKB)\n", mbps, t1 - t0, nrounds, bufsz/1024);
     xlink_aio_destroy(aio_poll);
 
     /* Epoll engine */
@@ -150,9 +151,28 @@ static int bench_pipe_throughput(void) {
         xlink_recv(rx, buf, &len);
     }
     t1 = now_ms();
-    double epoll_mbps = (nrounds * bufsz / (1024.0 * 1024.0)) / ((t1 - t0) / 1000.0);
-    printf("  Epoll: %.1f MB/s (%.1f ms for %dx %zuKB)\n", epoll_mbps, t1 - t0, nrounds, bufsz/1024);
+    mbps = (nrounds * bufsz / (1024.0 * 1024.0)) / ((t1 - t0) / 1000.0);
+    printf("  Epoll:    %.1f MB/s (%.1f ms for %dx %zuKB)\n", mbps, t1 - t0, nrounds, bufsz/1024);
     xlink_aio_destroy(aio_epoll);
+
+    /* io_uring engine */
+    void *aio_uring = xlink_aio_create(3);
+    if (aio_uring) {
+        t0 = now_ms();
+        for (int i = 0; i < nrounds; i++) {
+            xlink_send(tx, buf, bufsz);
+            xlink_channel_t *chans[] = {rx};
+            xlink_wait_aio(chans, 1, 100, aio_uring);
+            size_t len = bufsz;
+            xlink_recv(rx, buf, &len);
+        }
+        t1 = now_ms();
+        mbps = (nrounds * bufsz / (1024.0 * 1024.0)) / ((t1 - t0) / 1000.0);
+        printf("  io_uring: %.1f MB/s (%.1f ms for %dx %zuKB)\n", mbps, t1 - t0, nrounds, bufsz/1024);
+        xlink_aio_destroy(aio_uring);
+    } else {
+        printf("  io_uring: SKIP (not available)\n");
+    }
 
     free(buf);
     xlink_close(tx);

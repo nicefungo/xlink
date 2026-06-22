@@ -279,16 +279,35 @@ static int uring_unwatch(xlink_aio_t *aio, xlink_channel_t *ch) {
     struct aio_uring *ur = (struct aio_uring *)aio->priv;
     if (!ur || ch->fd < 0) return -1;
 
-    /* IORING_OP_POLL_REMOVE: cancel a previously added poll */
+    /* IORING_OP_POLL_REMOVE: cancel a previously added poll.
+     * Use user_data = 0 (never used by watch) so the wait path can
+     * skip POLL_REMOVE CQEs cleanly. */
     struct io_uring_sqe *sqe = get_sqe(&ur->sq);
     if (!sqe) return -1;
 
     sqe->opcode    = IORING_OP_POLL_REMOVE;
     sqe->fd        = ch->fd;
     sqe->addr      = (uint64_t)(uintptr_t)ch;
+    sqe->user_data = 0;  /* sentinel — skip in wait path */
 
     submit_sqe(&ur->sq);
     ur->pending++;
+
+    /* Flush the POLL_REMOVE CQE immediately so it doesn't leak
+     * into the next wait() call. */
+    int ret = io_uring_enter(ur->ring_fd, ur->pending, 1,
+                              IORING_ENTER_GETEVENTS);
+    ur->pending = 0;
+    if (ret > 0) {
+        /* Drain the CQE(s) produced by POLL_REMOVE.
+         * user_data == 0 → skip, no-op. */
+        uint32_t head = *ur->cq.head;
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        uint32_t tail = *ur->cq.tail;
+        if (head != tail) {
+            advance_cq(&ur->cq, (uint32_t)(tail - head));
+        }
+    }
 
     /* Clear from table */
     for (int i = 0; i < ur->max_idx; i++) {
