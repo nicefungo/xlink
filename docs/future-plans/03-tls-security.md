@@ -3,7 +3,7 @@
 > 优先级：P2 → **P1**（v2.1 目标）
 > 依赖：异步 I/O 引擎（用于异步 TLS 握手） | 被依赖：无
 > 预计工作量：约 3 周
-> 最后更新：2026-05-30 （同步 index.md 优先级）
+> 最后更新：2026-06-25 （v1 实现完成）
 
 ## 动机
 
@@ -117,3 +117,27 @@ typedef struct tcp_peer {
 - [插件化架构](01-plugins-arch.md) — TLS 可以作为可选插件加载
 - [异步 I/O 支持](02-async-io.md) — 非阻塞 TLS 握手需要事件驱动
 - [跨平台支持](05-multi-platform.md) — 不同平台 TLS 库适配
+
+## 实现状态（2026-06-25）
+
+**v1 已完成**（commit `746ef72`）：
+
+### 已实现
+- ✅ `XLINK_TLS` flag, `xlink_tls_config_t`, `xlink_tls_configure()` / `xlink_tls_enabled()`
+- ✅ `src/tls.c` — OpenSSL 适配层（SSL_CTX 管理、握手、读写、清理）
+- ✅ TCP 客户端/服务器模式 TLS 集成（via `write_framed_tls` / `read_framed_tls`）
+- ✅ 服务器多客户端 recv_multi TLS 路径
+- ✅ 大负载精确读取（loop `SSL_read` 保证读满请求量）
+- ✅ Makefile 双构建路径（`make all` 不引入 TLS 依赖，`make tls` 启用 OpenSSL）
+- ✅ 5 个测试用例，0 failures
+
+### 设计决策
+- **API 简化**：未引入 `xlink_open_tls()` 独立函数；使用 `xlink_open()` + `xlink_tls_configure()` 两步模式，保持向后兼容
+- **延迟握手**：握手延迟到首次 I/O（`tls_do_handshake` 在 read/write 时触发）
+- **仅 TCP**：TLS 仅支持 TCP 后端；`xlink_tls_configure()` 对非 TCP 通道返回 -1
+- **Blocking I/O**：当前使用阻塞式 `SSL_read`/`SSL_write`（v1 简化）
+
+### 已知限制
+- 服务器多客户端 TLS 复用同一个 SSL 对象（Per-client TLS 待实现）
+- 无异步 TLS 握手（blocking socket）
+- 无证书吊销检查（CRL/OCSP）

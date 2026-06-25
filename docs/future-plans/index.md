@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-06-24 (Round 93)
+> 最后更新：2026-06-25 (TLS v1 完成)
 
 ## 状态总览
 
@@ -61,7 +61,7 @@
 | io_uring 引擎 | **P0** | v2.0 | 中（~3天） | [02-async-io-phases.md](02-async-io-phases.md) | ✅ 已实现 |
 | 性能基准测试 | **P0** | eventfd/io_uring | 中 | [06-perf-benchmarks.md](06-perf-benchmarks.md) | ✅ 已完成 |
 | 文档更新 | **P0** | 所有 async 步骤完成 | 中 | [02-async-io-phases.md](02-async-io-phases.md) | ✅ 已更新 |
-| TLS 加密通信层 | **P1** | v2.1 async 完成 | 大（~3周） | [03-tls-security.md](03-tls-security.md) | 📝 设计中 |
+| TLS 加密通信层 | **P1** | v2.1 async 完成 | 大（~3周） | [03-tls-security.md](03-tls-security.md) | ✅ v1 已实现 |
 
 ### 近期已完成（v1.0 收尾）
 
@@ -167,6 +167,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 | 2026-05-25 | 第 62 轮文档审查 + 周度代码复查 | 30 test binaries ALL PASS (所有检查通过), 0 警告, 0 bug。第 62 轮连续干净审查。代码库自 Round 61 起无新提交（git log 无变化）。src/ 无变更（最后修改 May 8/file_backend.c .read vtable）。周度代码复查：2189 行（7 src + 1 include），6 后端 vtable 全部一致（.write=NULL 全统一，.read=实现 5/6 后端，仅 SHM 为 NULL expected，.peek=仅 SHM 实现）。无资源泄漏、无竞态、无返回值检查遗漏。所有 7 份 docs 检查通过：future-plans/ 5 个计划文档内容准确完整（01-05 均与代码现状一致）；slab-allocator.md 保持草案（pending benchmark justification）；integration-guide.md — API 签名与 xlink.h 匹配；proposal.md — 实现状态表准确；design-decisions.md — 8 项决策均当前有效；known-issues.md — 5 项均验证有效；api.md — 签名匹配；code-walkthrough.md — 架构描述准确。next-version-thoughts.md 无新内容需迁移（纯历史日志）。无新增 P0 待实现项。已知问题保持 5 项不变。 |
 | 2026-05-26 | 第 63 轮文档审查 | 30 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 62 起无新提交（git log 无变化，最后提交 c124cc8）。src/ 无变更（最后修改 May 8/file_backend.c .read vtable）。代码审查跳过（本周已于 Round 62 完成）。所有 docs 检查通过。无新增 P0。已知问题保持 5 项不变。 |
 | 2026-05-27 | 第 64 轮文档审查 | 30 test binaries ALL PASS, 0 警告, 0 bug。代码库自 Round 63 起无新提交（git log 无变化，最后 commit b76e7b5）。src/ 无变更（最后修改 May 8/file_backend.c .read vtable）。所有 7 份 docs + 5 份 future-plans/ plan docs 检查通过：内容准确、与代码一致。slab-allocator.md 保持草案（pending benchmark justification）。next-version-thoughts.md 无新内容需迁移（纯历史日志）。无新增 P0 待实现项。已知问题保持 5 项不变。本轮也检查了所有 5 个 plan 文档的跨文档一致性——依赖关系、接口签名、实现路径均互相兼容。 |
+| 2026-06-25 | TLS v1 实现完成 | Commit `746ef72`。实现 `src/tls.c`（OpenSSL 适配层），集成 TCP 客户端/服务器模式（via `write_framed_tls`/`read_framed_tls`），5 个测试用例全部通过。双构建路径（`make all` 无 TLS，`make tls` 启用 OpenSSL）。Backward compatible，非 TLS build 不受影响。已知限制：阻塞 I/O、无 per-client TLS。 |
 | 2026-06-24 | 第 93 轮周期审查 — v2.1 稳定维护 | make all 0 警告，make test 32/32 套件全部通过。代码库自 Round 92 起无新提交。v2.1 全部 P0 项（2.5-2.9）已完成。路线图仅剩 TLS 加密（P1，v2.2+）。known-issues 4 项 by-design/minor 不变。design-decisions 10 项均当前有效。src/ 无变更（跳过代码审查）。无新增 P0。 |
 | 2026-06-23 | 第 92 轮 | make all 0 warnings, make test 32/32 ALL PASS。代码库自 Round 91 起无新提交。v2.1 全部 P0 项（2.5-2.9）已在之前轮次完成。路线图仅剩 TLS 加密（P1，v2.2+）。known-issues 4 项 by-design/minor 不变。design-decisions 10 项均当前有效。无新增 P0。src/ 无变更（跳过代码审查）。 |
 | 2026-06-22 | 第 91 轮 | make all 0 warnings, make test all PASS (incl. 35 aio, 24 run, 6 perf benchmarks, 31 api_util, 42 plugin, 29 file_nonblock, 12 serial_nonblock, 23 tcp_server_nonblock, 17 tcp_zero, 20 tcp_overflow_client, 31 wait_edge)。git log 确认步骤 2.5-2.9 全部完成。清理 phases.md 中 2.6/2.7 的重复 `[ ]` 条目。v2.1 异步 I/O 全阶段完成，无待推进步骤。 |

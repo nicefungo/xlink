@@ -7,6 +7,7 @@
  *
  * Flags:
  *   XLINK_SERVER  → listen + multi-accept
+ *   XLINK_TLS     → TLS encryption (requires xlink_tls_configure)
  *   (default)     → connect to remote with auto-reconnect
  *
  * Stream transport: framing layer auto-enabled in xlink.c.
@@ -357,8 +358,25 @@ static int read_exact(int fd, void* buf, size_t n) {
  * Each retry polls POLLOUT with 10ms timeout → ~1s of retry. */
 #define MAX_WRITE_EAGAIN 100
 
-/* Write 4-byte BE length prefix + payload via writev. */
-static int write_framed(int fd, const void* data, size_t len) {
+/* Write 4-byte BE length prefix + payload via writev (or TLS). */
+static int write_framed_tls(xlink_channel_t *ch, int fd, const void* data, size_t len) {
+#ifdef XLINK_HAS_TLS
+    if (ch->tls) {
+        /* TLS path: send the framed bytes (hdr+payload) as one stream */
+        uint8_t hdr[4];
+        hdr[0] = (uint8_t)(len >> 24);
+        hdr[1] = (uint8_t)(len >> 16);
+        hdr[2] = (uint8_t)(len >> 8);
+        hdr[3] = (uint8_t)(len);
+
+        /* Write header then payload through TLS */
+        if (xlink_tls_write(ch, hdr, 4) != 0) return -1;
+        if (len > 0 && xlink_tls_write(ch, data, len) != 0) return -1;
+        return 0;
+    }
+#endif
+    (void)ch;
+
     uint8_t hdr[4];
     hdr[0] = (uint8_t)(len >> 24);
     hdr[1] = (uint8_t)(len >> 16);
@@ -401,10 +419,43 @@ static int write_framed(int fd, const void* data, size_t len) {
     return 0;
 }
 
-/* Read 4-byte BE length prefix then payload.
- * *len IN = capacity, OUT = message size.
- * Returns 0 on success, -1 on error. */
-static int read_framed(int fd, void* buf, size_t* len) {
+/* Read 4-byte BE length prefix then payload (or TLS). */
+static int read_framed_tls(xlink_channel_t *ch, int fd, void* buf, size_t* len) {
+#ifdef XLINK_HAS_TLS
+    if (ch->tls) {
+        /* TLS path: read header then payload through TLS */
+        uint8_t hdr[4];
+        size_t to_read = 4;
+        if (xlink_tls_read(ch, hdr, &to_read) != 0 || to_read != 4)
+            return -1;
+
+        uint32_t msglen = (uint32_t)hdr[0] << 24
+                        | (uint32_t)hdr[1] << 16
+                        | (uint32_t)hdr[2] << 8
+                        | (uint32_t)hdr[3];
+
+        if (msglen > *len) {
+            /* Discard payload to maintain framing sync */
+            size_t remaining = msglen;
+            while (remaining > 0) {
+                uint8_t chunk[4096];
+                size_t chunk_len = remaining > sizeof(chunk) ? sizeof(chunk) : remaining;
+                if (xlink_tls_read(ch, chunk, &chunk_len) != 0) return -1;
+                remaining -= chunk_len;
+            }
+            errno = ENOSPC;
+            return -1;
+        }
+
+        to_read = msglen;
+        if (xlink_tls_read(ch, buf, &to_read) != 0 || to_read != msglen)
+            return -1;
+        *len = msglen;
+        return 0;
+    }
+#endif
+    (void)ch;
+
     uint8_t hdr[4];
     if (read_exact(fd, hdr, 4) != 0) return -1;
 
@@ -414,8 +465,6 @@ static int read_framed(int fd, void* buf, size_t* len) {
                     | (uint32_t)hdr[3];
 
     if (msglen > *len) {
-        /* Discard all payload bytes to maintain framing sync,
-         * then tell caller to try again with a larger buffer. */
         size_t remaining = msglen;
         while (remaining > 0) {
             uint8_t chunk[4096];
@@ -436,18 +485,21 @@ static int send_to_all(tcp_priv_t* p, const void* data, size_t len,
     int ok_count = 0;
     for (int i = p->nclients - 1; i >= 0; i--) {
         int fd = p->client_fds[i];
-        /*
-         * write_framed uses a single writev(2) with retry for atomic
-         * header+payload send.  Two separate writes (hdr then payload)
-         * would risk a race: if the connection breaks between them, the
-         * receiver gets a 4-byte header with no payload, causing framing
-         * desync.  write_framed keeps header and payload in one stream op.
-         */
-        if (write_framed(fd, data, len) != 0) {
+#ifdef XLINK_HAS_TLS
+        int saved_fd = ch->fd;
+        if (ch->tls) ch->fd = fd;  /* TLS needs the correct fd */
+#endif
+        if (write_framed_tls(ch, fd, data, len) != 0) {
+#ifdef XLINK_HAS_TLS
+            ch->fd = saved_fd;
+#endif
             /* Remove dead client */
             close(p->client_fds[i]);
             p->client_fds[i] = p->client_fds[--p->nclients];
         } else {
+#ifdef XLINK_HAS_TLS
+            ch->fd = saved_fd;
+#endif
             ok_count++;
         }
     }
@@ -491,7 +543,7 @@ static int tcp_backend_send(xlink_channel_t* ch, const void* data, size_t len) {
         }
     }
 
-    if (write_framed(ch->fd, data, len) != 0) {
+    if (write_framed_tls(ch, ch->fd, data, len) != 0) {
         /* Connection lost — mark for reconnect */
         int save_errno = errno;
         close(ch->fd);
@@ -563,6 +615,34 @@ static int recv_multi(tcp_priv_t* p, xlink_channel_t* ch, void* buf, size_t* len
 
         int client_fd = fds[i].fd;
 
+#ifdef XLINK_HAS_TLS
+        if (ch->tls) {
+            /* TLS: temporarily bind channel to this client fd,
+             * then use read_framed_tls. Also swap ch->fd for
+             * the TLS handshake/I/O. */
+            int saved_fd = ch->fd;
+            ch->fd = client_fd;
+            if (read_framed_tls(ch, client_fd, buf, len) == 0) {
+                ch->fd = saved_fd;
+                /* After successful TLS read, set this as the active client */
+                if (p->nclients > 1) {
+                    /* Keep only this client — TLS is single-client */
+                    for (int j = 0; j < p->nclients; j++) {
+                        if (p->client_fds[j] != client_fd)
+                            close(p->client_fds[j]);
+                    }
+                    p->client_fds[0] = client_fd;
+                    p->nclients = 1;
+                }
+                return 0;
+            }
+            ch->fd = saved_fd;
+            remove_client(p, i - 1);
+            goto next_client;
+        }
+#endif
+
+        /* Non-TLS: raw read_exact for framing */
         /* Read framing header (4-byte BE length) */
         uint8_t hdr[4];
         if (read_exact(client_fd, hdr, 4) != 0) {
@@ -636,7 +716,7 @@ static int tcp_backend_recv(xlink_channel_t* ch, void* buf, size_t* len) {
             }
         }
 
-        if (read_framed(ch->fd, buf, len) == 0)
+        if (read_framed_tls(ch, ch->fd, buf, len) == 0)
             return 0;
 
         /* Transient EAGAIN on non-blocking socket — don't disconnect */

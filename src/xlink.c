@@ -381,6 +381,7 @@ xlink_channel_t* xlink_open(xlink_type_t type, const char* addr,
     ch->backend = bk;
     ch->fd      = -1;
     ch->flags   = opt ? (int)opt->flags : 0;
+    ch->opt     = opt ? *opt : (xlink_opt_t)XLINK_OPT_DEFAULT;
     ch->errbuf[0] = '\0';
 
     ch->use_framing = (type == XLINK_PIPE || type == XLINK_TCP
@@ -432,6 +433,9 @@ int xlink_peek(xlink_channel_t* ch, size_t* avail) {
 
 void xlink_close(xlink_channel_t* ch) {
     if (!ch) return;
+#ifdef XLINK_HAS_TLS
+    xlink_tls_cleanup(ch);
+#endif
     ch->backend->close(ch);
     free(ch);
 }

@@ -39,7 +39,18 @@ typedef enum {
     XLINK_SERVER   = 1 << 1,   /* Bind / listen (TCP, PIPE)              */
     XLINK_NONBLOCK = 1 << 2,   /* Non-blocking I/O                       */
     XLINK_BROADCAST = 1 << 3,  /* Multiple consumers (SHM)              */
+    XLINK_TLS      = 1 << 4,   /* Enable TLS (TCP only)                  */
 } xlink_flag_t;
+
+/* ─── TLS Configuration ───────────────────────────────── */
+
+typedef struct {
+    const char *cert_file;      /* PEM certificate (server mode)         */
+    const char *key_file;       /* PEM private key (server mode)         */
+    const char *ca_file;        /* CA cert for peer verification         */
+    int         verify_peer;    /* non-zero = verify peer certificate    */
+    const char *sni_hostname;   /* SNI hostname (client mode)            */
+} xlink_tls_config_t;
 
 /* ─── Open Options ────────────────────────────────────── */
 
@@ -195,6 +206,21 @@ void  xlink_aio_destroy(void *engine);
 
 /* Get engine name ("poll", "epoll", "io_uring"). */
 const char *xlink_aio_name(void *engine);
+
+/* ─── TLS ─────────────────────────────────────────────── */
+
+#ifdef XLINK_HAS_TLS
+
+/* Set TLS configuration on a channel (before first use).
+ * Must be called after xlink_open() but before any send/recv.
+ * Returns 0 on success, -1 on error (use xlink_errstr). */
+int xlink_tls_configure(xlink_channel_t *ch,
+                        const xlink_tls_config_t *cfg);
+
+/* Return non-zero if channel has TLS enabled. */
+int xlink_tls_enabled(xlink_channel_t *ch);
+
+#endif /* XLINK_HAS_TLS */
 
 /* ─── Error Reporting ─────────────────────────────────── */
 

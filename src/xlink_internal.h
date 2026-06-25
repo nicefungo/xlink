@@ -26,6 +26,8 @@ struct xlink_channel {
     int                    flags;
     int                    use_framing;
     char                   errbuf[128];
+    xlink_opt_t            opt;      /* saved open options */
+    void                  *tls;      /* TLS state (tls_state_t *) */
 };
 
 /* ─── Backend declarations (defined in backend .c files) ─ */
@@ -63,6 +65,14 @@ const xlink_plugin_t *xlink_plugin_find_by_type(xlink_type_t type);
 int  xlink_plugin_load(const char *so_path);
 void xlink_plugins_init(void);
 size_t xlink_plugin_count_impl(void);
+
+/* ─── TLS internal hooks ──────────────────────────────── */
+
+#ifdef XLINK_HAS_TLS
+int  xlink_tls_write(xlink_channel_t *ch, const void *data, size_t len);
+int  xlink_tls_read(xlink_channel_t *ch, void *buf, size_t *len);
+void xlink_tls_cleanup(xlink_channel_t *ch);
+#endif
 
 /* ─── Helpers usable by backends ───────────────────────── */
 
