@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-06-25 (TLS v1 完成)
+> 最后更新：2026-07-07 (TLS Phase 2 设计)
 
 ## 状态总览
 
@@ -172,6 +172,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 | 2026-06-23 | 第 92 轮 | make all 0 warnings, make test 32/32 ALL PASS。代码库自 Round 91 起无新提交。v2.1 全部 P0 项（2.5-2.9）已在之前轮次完成。路线图仅剩 TLS 加密（P1，v2.2+）。known-issues 4 项 by-design/minor 不变。design-decisions 10 项均当前有效。无新增 P0。src/ 无变更（跳过代码审查）。 |
 | 2026-06-22 | 第 91 轮 | make all 0 warnings, make test all PASS。git log 确认步骤 2.5-2.9 全部完成。清理 phases.md 中 2.6/2.7 的重复 `[ ]` 条目。v2.1 异步 I/O 全阶段完成，无待推进步骤。 |
 | 2026-07-07 | 第 95 轮周期审查 — v2.1 稳定，全阶段完成 | make all 0 warnings，make test 32/32 ALL PASS。Phase 2 步骤 2.1-2.9 全部 ✅，TLS v1 已合入 (Round 94)。代码库自 Round 94 起无新提交（git log -5 仅 docs rounds + TLS feat）。src/ 无变更（跳过代码审查）。known-issues 4 项 by-design/minor 不变。design-decisions 10 项均当前有效。future-plans 6 个计划文档准确。路线图仅剩 TLS P1（v2.2+）和性能优化 P1。无新增 P0。 |
+| 2026-07-07 | 第 96 轮 — TLS Phase 2 深化设计 | 03-tls-security.md 补充 Phase 2 详细设计方案：per-client TLS 映射表（服务器多客户端）、非阻塞握手（xlink_run 事件循环集成）、ALPN 协议协商、TLS 会话缓存。包含接口签名、数据结构、实现步骤和代码示例。make all 0 warnings，make test 32/32 ALL PASS。 |
 
 ## 相关文档
 

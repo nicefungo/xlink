@@ -99,11 +99,203 @@ typedef struct tcp_peer {
 - [ ] TLS 1.3 early data（0-RTT）
 - [ ] 连接恢复（快速重连）
 
+## Phase 2 深化设计（2026-07-07）
+
+### Per-Client TLS（服务器模式）
+
+**问题**：当前 TLS 服务器模式下所有客户端共享同一个 `SSL *` 对象，导致：
+- 客户端 A 握手成功后，客户端 B 的连接会覆盖 SSL 状态
+- 无法对单个客户端做证书吊销或连接关闭
+- 多客户端并发数据混入同一个 SSL 缓冲区
+
+**方案**：TCP 后端维护 per-fd TLS 映射表：
+
+```c
+/* tcp_backend.c — per-client TLS state */
+#define MAX_TLS_CLIENTS 64
+
+typedef struct {
+    int   fd;
+    SSL  *ssl;          /* per-client SSL object */
+    int   handshake_done;
+    char  peer_cn[256]; /* X509 common name (optional) */
+} tls_client_t;
+
+typedef struct {
+    /* Server mode per-client TLS */
+    tls_client_t tls_clients[MAX_TLS_CLIENTS];
+    int          n_tls_clients;
+
+    /* Server's shared SSL_CTX (from xlink_tls_configure) */
+    SSL_CTX     *server_ctx;
+    int          is_tls_server;
+} tcp_priv_t;
+```
+
+**accept 路径**：
+1. `accept()` 返回新 fd
+2. 在 tls_clients[] 中查找空闲 slot
+3. `SSL_new(server_ctx)` → `SSL_set_fd(ssl, fd)` → `SSL_accept(ssl)`（非阻塞，见下方）
+4. 握手完成后从 `X509` 提取 `peer_cn`
+
+**send/recv 路径**：
+- 查找 fd 对应的 `tls_client_t *`
+- 使用其 `ssl` 做 SSL_write/SSL_read
+- 如果该 slot 为 NULL → 走明文路径（兼容非 TLS 客户端）
+
+**cleanup**：
+- `shutdown_fd()` 时释放对应 `tls_client_t` slot
+- 从 `client_fds[]` 移除后同时从 `tls_clients[]` 移除
+- `SSL_shutdown()` + `SSL_free()`
+
+### 非阻塞 TLS 握手（与异步 I/O 集成）
+
+**目标**：TLS 握手不再阻塞整个线程，适配 `xlink_run()` 事件循环。
+
+**关键点**：
+- OpenSSL 在非阻塞 socket 上调用 `SSL_accept()` / `SSL_connect()` 可能返回 `SSL_ERROR_WANT_READ` 或 `SSL_ERROR_WANT_WRITE`
+- 此时不能视为错误，需要等待 socket 可读/可写后重试
+- 这与 `xlink_run()` 的事件驱动模型天然兼容
+
+**实现方案**：
+
+```c
+/* aio.c — TLS handshake integration into event loop */
+
+/* Per-channel handshake state */
+typedef enum {
+    HS_IDLE,          /* no TLS or already done */
+    HS_WANT_READ,     /* need socket readable to continue */
+    HS_WANT_WRITE,    /* need socket writable to continue */
+    HS_DONE,
+    HS_FAILED
+} handshake_state_t;
+
+/* Added to xlink_channel_t internal */
+typedef struct xlink_channel {
+    /* ... existing fields ... */
+    handshake_state_t hs_state;   /* TLS handshake progress */
+    /* ... */
+} xlink_channel_t;
+```
+
+**xlink_run() 集成**：
+
+```
+xlink_run 主循环:
+  for each channel with hs_state ∈ {HS_WANT_READ, HS_WANT_WRITE}:
+    1. epoll 监听 fd（EPOLLIN 或 EPOLLOUT）
+    2. 事件触发 → 调用 tls_do_handshake_nonblock(ch)
+    3. 函数返回:
+       - 0 (HS_DONE) → 转为正常 read/write 模式
+       - SSL_ERROR_WANT_READ/WRITE → 更新 hs_state，下轮继续
+       - 其他 → 触发 on_error 回调
+```
+
+**非阻塞握手函数**：
+
+```c
+static int tls_do_handshake_nonblock(xlink_channel_t *ch) {
+    tls_state_t *ts = ch->tls;
+    int ret = ts->is_server ? SSL_accept(ts->ssl)
+                            : SSL_connect(ts->ssl);
+
+    if (ret == 1) {
+        ts->handshake_done = 1;
+        ch->hs_state = HS_DONE;
+        return 0;
+    }
+
+    int ssl_err = SSL_get_error(ts->ssl, ret);
+    switch (ssl_err) {
+    case SSL_ERROR_WANT_READ:
+        ch->hs_state = HS_WANT_READ;
+        return 1;  /* caller should wait for EPOLLIN */
+    case SSL_ERROR_WANT_WRITE:
+        ch->hs_state = HS_WANT_WRITE;
+        return 1;  /* caller should wait for EPOLLOUT */
+    default:
+        ch->hs_state = HS_FAILED;
+        /* record error in ch->errbuf */
+        return -1;
+    }
+}
+```
+
+### ALPN 协商
+
+**目标**：允许应用通过 TLS 协商协商应用层协议（例如区分 binary 帧协议 vs JSON）。
+
+**API**：
+
+```c
+/* 新增到 xlink_tls_config_t */
+typedef struct xlink_tls_config {
+    /* ... existing fields ... */
+    const char *alpn_protos;     /* comma-separated, e.g. "xlink/1,xlink/json" */
+    char        alpn_negotiated[64]; /* output: negotiated protocol */
+} xlink_tls_config_t;
+```
+
+**OpenSSL 实现**：
+```c
+static int tls_setup_alpn(SSL_CTX *ctx, const char *protos) {
+    /* "xlink/1,xlink/json" → 8\xlink/1\x0a\xlink/json */
+    /* 或使用 SSL_set_alpn_protos() 带长度前缀格式 */
+    unsigned char wire[256];
+    int len = alpn_encode(protos, wire, sizeof(wire));
+    if (len < 0) return -1;
+    SSL_CTX_set_alpn_protos(ctx, wire, len);
+    return 0;
+}
+
+/* 握手完成后读取协商结果 */
+static void tls_get_alpn_result(SSL *ssl, xlink_tls_config_t *cfg) {
+    const unsigned char *data;
+    unsigned int len;
+    SSL_get0_alpn_selected(ssl, &data, &len);
+    if (data && len < sizeof(cfg->alpn_negotiated)) {
+        memcpy(cfg->alpn_negotiated, data, len);
+        cfg->alpn_negotiated[len] = '\0';
+    }
+}
+```
+
+### 会话恢复（TLS Session Cache）
+
+**目标**：TLS 重连时跳过完整握手，减少 1-RTT 延迟。
+
+**方案**（Phase 2 scope — 仅客户端）：
+```c
+typedef struct xlink_tls_config {
+    /* ... existing fields ... */
+    const char *session_file;    /* 持久化 session ticket 到文件 */
+    int         session_timeout; /* 默认 300 秒 */
+} xlink_tls_config_t;
+```
+
+- `SSL_set_session_cache_mode(ctx, SSL_SESS_CACHE_CLIENT)`
+- 成功握手后 `SSL_SESSION *s = SSL_get1_session(ssl)` → 序列化到 session_file
+- 下次连接：`SSL_set_session(ssl, session)` → 尝试会话恢复
+- 服务器无需改动（session ticket 由 client 存储和发送）
+
+### Phase 2 实现步骤
+
+| 步骤 | 内容 | 预计工作量 |
+|------|------|-----------|
+| 2.1 | Per-client TLS 映射表 + multi-client accept 路径 | ~2天 |
+| 2.2 | 非阻塞握手 + xlink_run 集成 | ~3天 |
+| 2.3 | ALPN 协商 | ~1天 |
+| 2.4 | TLS 会话缓存（客户端） | ~1天 |
+| 2.5 | 补充测试：per-client + nonblock + ALPN | ~2天 |
+| 2.6 | 更新文档 | ~0.5天 |
+
 ## 依赖
 
 - **Phase 1-2**: OpenSSL >= 1.1.1（或 LibreSSL）
 - **Phase 3**: WolfSSL（嵌入式）/ BoringSSL（Android）
 - **前置依赖**: 异步 I/O（[02-async-io.md](02-async-io.md)）—— 非阻塞握手需要事件循环
+- **前置依赖**: xlink_run() 事件回调 — 已在 v2.1 实现 ✅
 
 ## 开放问题
 
