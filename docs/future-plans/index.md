@@ -170,7 +170,8 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 | 2026-06-25 | TLS v1 实现完成 | Commit `746ef72`。实现 `src/tls.c`（OpenSSL 适配层），集成 TCP 客户端/服务器模式（via `write_framed_tls`/`read_framed_tls`），5 个测试用例全部通过。双构建路径（`make all` 无 TLS，`make tls` 启用 OpenSSL）。Backward compatible，非 TLS build 不受影响。已知限制：阻塞 I/O、无 per-client TLS。 |
 | 2026-06-24 | 第 93 轮周期审查 — v2.1 稳定维护 | make all 0 警告，make test 32/32 套件全部通过。代码库自 Round 92 起无新提交。v2.1 全部 P0 项（2.5-2.9）已完成。路线图仅剩 TLS 加密（P1，v2.2+）。known-issues 4 项 by-design/minor 不变。design-decisions 10 项均当前有效。src/ 无变更（跳过代码审查）。无新增 P0。 |
 | 2026-06-23 | 第 92 轮 | make all 0 warnings, make test 32/32 ALL PASS。代码库自 Round 91 起无新提交。v2.1 全部 P0 项（2.5-2.9）已在之前轮次完成。路线图仅剩 TLS 加密（P1，v2.2+）。known-issues 4 项 by-design/minor 不变。design-decisions 10 项均当前有效。无新增 P0。src/ 无变更（跳过代码审查）。 |
-| 2026-06-22 | 第 91 轮 | make all 0 warnings, make test all PASS (incl. 35 aio, 24 run, 6 perf benchmarks, 31 api_util, 42 plugin, 29 file_nonblock, 12 serial_nonblock, 23 tcp_server_nonblock, 17 tcp_zero, 20 tcp_overflow_client, 31 wait_edge)。git log 确认步骤 2.5-2.9 全部完成。清理 phases.md 中 2.6/2.7 的重复 `[ ]` 条目。v2.1 异步 I/O 全阶段完成，无待推进步骤。 |
+| 2026-06-22 | 第 91 轮 | make all 0 warnings, make test all PASS。git log 确认步骤 2.5-2.9 全部完成。清理 phases.md 中 2.6/2.7 的重复 `[ ]` 条目。v2.1 异步 I/O 全阶段完成，无待推进步骤。 |
+| 2026-07-07 | 第 95 轮周期审查 — v2.1 稳定，全阶段完成 | make all 0 warnings，make test 32/32 ALL PASS。Phase 2 步骤 2.1-2.9 全部 ✅，TLS v1 已合入 (Round 94)。代码库自 Round 94 起无新提交（git log -5 仅 docs rounds + TLS feat）。src/ 无变更（跳过代码审查）。known-issues 4 项 by-design/minor 不变。design-decisions 10 项均当前有效。future-plans 6 个计划文档准确。路线图仅剩 TLS P1（v2.2+）和性能优化 P1。无新增 P0。 |
 
 ## 相关文档
 
