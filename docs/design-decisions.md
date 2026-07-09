@@ -197,3 +197,35 @@ if it fails, falls back to POSIX `poll()`. Users can still explicitly request
 **Trade-off**: The auto-detection is purely compile/runtime based on kernel
 support. No configure-time feature detection — intentionally simple for a
 library of this size.
+
+## 11. Per-Client TLS via Parallel Arrays (Server Mode)
+
+**Where**: `src/tcp_backend.c` — `tcp_priv_t` and `src/tls.c` — `tls_clone_for_client()`
+
+**What**: In TLS server mode, each accepted client gets its own `SSL` object
+(stored in `client_tls[MAX_CLIENTS]`, parallel to `client_fds[MAX_CLIENTS]`),
+all sharing a single `SSL_CTX` from the channel. The `recv_multi()` and
+`send_to_all()` paths temporarily swap `ch->tls` to the per-client TLS state
+during I/O.
+
+**Why**:
+- SSL objects are per-socket — you can't multiplex a single SSL over multiple
+  fds. The naive approach (one `ch->tls` for all clients) binds to whichever fd
+  was last accepted, leaving prior clients' TLS in an undefined state.
+- SSL_CTX (certificates, verification policy, TLS version) IS shared — one
+  server channel has one trust configuration. Cloning separate CTX per client
+  would waste memory and risk divergence.
+- Parallel arrays (`client_fds[i]` ↔ `client_tls[i]`) keep memory contiguous
+  and avoid pointer indirection compared to a `struct { int fd; SSL *ssl; }`
+  array. Cache locality matters for the poll loop.
+- Temporary `ch->tls` swap means `read_framed_tls()` / `write_framed_tls()`
+  don't need signature changes — purely internal to the backend.
+
+**Trade-off**: The swap pattern (`saved_tls = ch->tls; ch->tls = client_tls[i];
+...; ch->tls = saved_tls`) is not thread-safe. A concurrent thread accessing
+`ch->tls` would see inconsistent state. This is acceptable because xlink
+channels are single-writer/single-reader by design.
+
+**Alternatives considered**: Passing TLS state as an extra parameter to every
+framing function — cleaner architecturally but doubles the parameter count
+across 4 functions. The swap pattern is uglier but contained.

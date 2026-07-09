@@ -39,6 +39,14 @@ typedef struct {
     int   client_fds[MAX_CLIENTS];
     int   nclients;
 
+#ifdef XLINK_HAS_TLS
+    /* Per-client TLS state (server mode only).
+     * Each accepted client gets its own SSL object,
+     * sharing the SSL_CTX from ch->tls.  NULL for
+     * non-TLS mode or clients that haven't handshook yet. */
+    void *client_tls[MAX_CLIENTS];   /* tls_state_t* (ctx=NULL, ssl=owned) */
+#endif
+
     /* Client mode (reconnect info) */
     char*     recon_host;     /* saved for reconnection */
     uint16_t  recon_port;
@@ -55,19 +63,40 @@ static int tcp_set_nodelay(int fd) {
     return setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
 }
 
+/* Forward decl for per-client TLS — defined in tls.c */
+#ifdef XLINK_HAS_TLS
+static void *tls_clone_for_client(void *ch_tls, int client_fd, xlink_channel_t *ch);
+#endif
+
 static void add_client(tcp_priv_t* p, int fd) {
     if (p->nclients >= MAX_CLIENTS) {
         close(fd);
         return;
     }
     tcp_set_nodelay(fd);
-    p->client_fds[p->nclients++] = fd;
+    p->client_fds[p->nclients] = fd;
+#ifdef XLINK_HAS_TLS
+    p->client_tls[p->nclients] = NULL;  /* populated in recv_multi */
+#endif
+    p->nclients++;
 }
 
 static void remove_client(tcp_priv_t* p, int idx) {
     if (idx < 0 || idx >= p->nclients) return;
     close(p->client_fds[idx]);
+#ifdef XLINK_HAS_TLS
+    /* Free per-client TLS state if any */
+    if (p->client_tls[idx]) {
+        /* Only free the SSL, not the shared CTX */
+        extern void xlink_tls_free_client_ssl(void *tls);
+        xlink_tls_free_client_ssl(p->client_tls[idx]);
+        p->client_tls[idx] = NULL;
+    }
+#endif
     p->client_fds[idx] = p->client_fds[--p->nclients];
+#ifdef XLINK_HAS_TLS
+    p->client_tls[idx] = p->client_tls[p->nclients];
+#endif
 }
 
 /* Parse "host:port" or ":port" into host (malloc'd) and port */
@@ -261,8 +290,17 @@ static void tcp_backend_close(xlink_channel_t* ch) {
     } else {
         /* Server mode */
         if (p->listen_fd >= 0) close(p->listen_fd);
-        for (int i = 0; i < p->nclients; i++)
+        for (int i = 0; i < p->nclients; i++) {
             if (p->client_fds[i] >= 0) close(p->client_fds[i]);
+#ifdef XLINK_HAS_TLS
+            /* Free per-client TLS SSL objects (CTX is shared, freed by channel close) */
+            if (p->client_tls[i]) {
+                extern void xlink_tls_free_client_ssl(void *tls);
+                xlink_tls_free_client_ssl(p->client_tls[i]);
+                p->client_tls[i] = NULL;
+            }
+#endif
+        }
         p->nclients = 0;
     }
 
@@ -486,19 +524,24 @@ static int send_to_all(tcp_priv_t* p, const void* data, size_t len,
     for (int i = p->nclients - 1; i >= 0; i--) {
         int fd = p->client_fds[i];
 #ifdef XLINK_HAS_TLS
+        /* Per-client TLS: swap channel's TLS state to this client.
+         * Client mode uses ch->tls directly; server mode uses per-client tls. */
+        void *saved_tls = ch->tls;
+        if (p->client_tls[i]) ch->tls = p->client_tls[i];
+        else if (saved_tls)  ch->tls = saved_tls;
         int saved_fd = ch->fd;
-        if (ch->tls) ch->fd = fd;  /* TLS needs the correct fd */
+        if (ch->tls) ch->fd = fd;
 #endif
         if (write_framed_tls(ch, fd, data, len) != 0) {
 #ifdef XLINK_HAS_TLS
             ch->fd = saved_fd;
+            ch->tls = saved_tls;
 #endif
-            /* Remove dead client */
-            close(p->client_fds[i]);
-            p->client_fds[i] = p->client_fds[--p->nclients];
+            remove_client(p, i);
         } else {
 #ifdef XLINK_HAS_TLS
             ch->fd = saved_fd;
+            ch->tls = saved_tls;
 #endif
             ok_count++;
         }
@@ -604,7 +647,18 @@ static int recv_multi(tcp_priv_t* p, xlink_channel_t* ch, void* buf, size_t* len
                 int cf = fcntl(cfd, F_GETFL, 0);
                 fcntl(cfd, F_SETFL, cf | O_NONBLOCK);
             }
+            int idx = p->nclients;
             add_client(p, cfd);
+#ifdef XLINK_HAS_TLS
+            /* Per-client TLS: clone SSL from channel's CTX for this client.
+             * The CTX (certs, verification) is shared; each client gets its
+             * own SSL object for independent handshake and I/O. */
+            if (ch->tls && !p->client_tls[idx]) {
+                p->client_tls[idx] = tls_clone_for_client(ch->tls, cfd, ch);
+            }
+#else
+            (void)idx;
+#endif
         }
     }
 
@@ -614,30 +668,33 @@ static int recv_multi(tcp_priv_t* p, xlink_channel_t* ch, void* buf, size_t* len
             continue;
 
         int client_fd = fds[i].fd;
+        int client_idx = -1;
+
+        /* Find the client index in our array (needed for per-client TLS) */
+        for (int j = 0; j < p->nclients; j++) {
+            if (p->client_fds[j] == client_fd) { client_idx = j; break; }
+        }
+        if (client_idx < 0) continue;
 
 #ifdef XLINK_HAS_TLS
-        if (ch->tls) {
-            /* TLS: temporarily bind channel to this client fd,
-             * then use read_framed_tls. Also swap ch->fd for
-             * the TLS handshake/I/O. */
-            int saved_fd = ch->fd;
+        /* Per-client TLS: use this client's own SSL state.
+         * Temporarily swap ch->tls to the per-client one so that
+         * read_framed_tls() uses the right SSL object. */
+        void *saved_tls = ch->tls;
+        int   saved_fd  = ch->fd;
+        void *client_tls_state = p->client_tls[client_idx];
+
+        if (client_tls_state) {
+            ch->tls = client_tls_state;
             ch->fd = client_fd;
             if (read_framed_tls(ch, client_fd, buf, len) == 0) {
+                ch->tls = saved_tls;
                 ch->fd = saved_fd;
-                /* After successful TLS read, set this as the active client */
-                if (p->nclients > 1) {
-                    /* Keep only this client — TLS is single-client */
-                    for (int j = 0; j < p->nclients; j++) {
-                        if (p->client_fds[j] != client_fd)
-                            close(p->client_fds[j]);
-                    }
-                    p->client_fds[0] = client_fd;
-                    p->nclients = 1;
-                }
                 return 0;
             }
+            ch->tls = saved_tls;
             ch->fd = saved_fd;
-            remove_client(p, i - 1);
+            remove_client(p, client_idx);
             goto next_client;
         }
 #endif

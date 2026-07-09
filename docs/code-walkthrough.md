@@ -283,7 +283,8 @@ static int recv_multi(tcp_priv_t* p, xlink_channel_t* ch, void* buf, size_t* len
 
 Key behaviors:
 - **Infinite loop**: `recv_multi()` does NOT return -1 on "no data" — it blocks forever. This is a blocking call by design.
-- **Swap-remove on disconnect**: `remove_client()` uses the `array[--n]` pattern (O(1) removal, no memmove).
+- **Swap-remove on disconnect**: `remove_client()` uses the `array[--n]` pattern (O(1) removal, no memmove). This includes cleanup of per-client TLS state (`client_tls[].ssl`) when `XLINK_HAS_TLS` is defined.
+- **Per-client TLS (2026-07-09)**: In TLS server mode, each accepted client gets its own `SSL` object cloned from the channel's `SSL_CTX`. `recv_multi()` temporarily swaps `ch->tls` to the per-client TLS state for `read_framed_tls()`. See `design-decisions.md` §11 for rationale.
 - **Atomic framing**: `write_framed()` uses a single `writev(2)` with header+payload as two iovecs. Two separate `write()` calls could race on connection break, leaving the receiver with a 4-byte header and no payload, desyncing framing permanently.
 - **Discard on oversized**: If a received message exceeds the caller's buffer, it reads and discards all bytes, then continues the poll loop. The caller gets ENOSPC and needs to retry with a larger buffer.
 

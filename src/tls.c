@@ -265,6 +265,49 @@ void xlink_tls_cleanup(xlink_channel_t *ch) {
     ch->tls = NULL;
 }
 
+/* ─── Per-client TLS (server mode) ────────────────────── */
+
+/* Clone a new SSL object for a client from the channel's SSL_CTX.
+ * The ctx is shared; only the SSL is new.  Returns a tls_state_t*
+ * with ctx=NULL (borrowed from ch->tls) and a fresh SSL bound to fd.
+ * Handshake happens on first I/O via the normal tls_do_handshake path. */
+void *tls_clone_for_client(void *ch_tls, int client_fd, xlink_channel_t *ch) {
+    tls_state_t *ts = (tls_state_t *)ch_tls;
+    if (!ts || !ts->ctx) return NULL;
+
+    tls_state_t *cs = calloc(1, sizeof(*cs));
+    if (!cs) return NULL;
+
+    cs->ssl = SSL_new(ts->ctx);
+    if (!cs->ssl) {
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "TLS: SSL_new for client failed: %s",
+                 ERR_error_string(ERR_get_error(), NULL));
+        free(cs);
+        return NULL;
+    }
+
+    SSL_set_fd(cs->ssl, client_fd);
+    cs->is_server = 1;
+    cs->configured = 1;
+    cs->handshake_done = 0;  /* do handshake on first I/O */
+    cs->ctx = NULL;  /* borrowed from channel, don't free */
+
+    return cs;
+}
+
+/* Free per-client SSL (but NOT the CTX — that's shared and freed by channel). */
+void xlink_tls_free_client_ssl(void *tls) {
+    if (!tls) return;
+    tls_state_t *cs = (tls_state_t *)tls;
+    if (cs->ssl) {
+        SSL_shutdown(cs->ssl);
+        SSL_free(cs->ssl);
+    }
+    /* cs->ctx is borrowed — do NOT free */
+    free(cs);
+}
+
 #else /* !XLINK_HAS_TLS — stubs */
 
 int xlink_tls_configure(xlink_channel_t *ch,

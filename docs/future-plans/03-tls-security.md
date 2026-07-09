@@ -84,6 +84,13 @@ typedef struct tcp_peer {
 
 ### Phase 2: 完善
 
+- [x] **Per-client TLS 状态（2026-07-09）**：server 模式下每个客户端独立 SSL 对象
+  - `tcp_priv_t` 新增 `client_tls[MAX_CLIENTS]` 数组，与 `client_fds` 并行维护
+  - `tls.c` 新增 `tls_clone_for_client()` — 从共享 SSL_CTX 克隆独立 SSL
+  - `tls.c` 新增 `xlink_tls_free_client_ssl()` — 释放 per-client SSL（不释放共享 CTX）
+  - `recv_multi()` 重写 TLS 路径：查找对应 `client_tls[]`，临时 swap `ch->tls`
+  - `send_to_all()` 同样支持 per-client TLS swap
+  - `add_client`/`remove_client`/`tcp_backend_close` 都正确管理 per-client TLS 生命周期
 - [ ] 证书验证回调（自定义验证逻辑）
 - [ ] session 缓存 / session ticket
 - [ ] ALPN 协商（应用层协议声明）
