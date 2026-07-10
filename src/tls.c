@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #ifdef XLINK_HAS_TLS
 
@@ -24,12 +25,21 @@
 
 /* ─── Per-channel TLS state ───────────────────────────── */
 
+typedef enum {
+    TLS_HS_IDLE = 0,       /* handshake not started yet */
+    TLS_HS_WANT_READ,      /* need fd readable to continue */
+    TLS_HS_WANT_WRITE,     /* need fd writable to continue */
+    TLS_HS_DONE,           /* handshake completed successfully */
+    TLS_HS_FAILED          /* handshake failed */
+} tls_hs_state_t;
+
 typedef struct {
     SSL_CTX *ctx;
     SSL     *ssl;
     int      is_server;   /* 1 = server (SSL_accept), 0 = client (SSL_connect) */
     int      handshake_done;
     int      configured;
+    tls_hs_state_t hs_state; /* non-blocking handshake state */
 } tls_state_t;
 
 /* ─── Global init / cleanup ───────────────────────────── */
@@ -147,37 +157,95 @@ int xlink_tls_enabled(xlink_channel_t *ch) {
 
 /* ─── Internal: handshake ─────────────────────────────── */
 
+/* Check if socket is in non-blocking mode */
+static int tls_sock_is_nonblock(int fd) {
+    if (fd < 0) return 0;
+    int fl = fcntl(fd, F_GETFL, 0);
+    return (fl != -1 && (fl & O_NONBLOCK));
+}
+
+/* do one step of the TLS handshake.  For blocking sockets, returns 0 on
+ * success or -1 on error.  For non-blocking sockets, may return:
+ *   0  = handshake done
+ *   1  = need retry (caller should wait for EPOLLIN or EPOLLOUT)
+ *  -1  = fatal error */
 static int tls_do_handshake(xlink_channel_t *ch, tls_state_t *ts) {
     if (ts->handshake_done) return 0;
 
-    /* Bind SSL to socket fd for transparent I/O */
+    /* Persistent SSL_set_fd call: OpenSSL requires it once at least,
+     * but re-binding is harmless and handles reconnection. */
     if (!SSL_set_fd(ts->ssl, ch->fd)) {
         snprintf(ch->errbuf, sizeof(ch->errbuf),
                  "TLS: SSL_set_fd failed");
+        ts->hs_state = TLS_HS_FAILED;
         return -1;
     }
 
     int ret;
+    int is_nonblock = tls_sock_is_nonblock(ch->fd);
+
     if (ts->is_server)
         ret = SSL_accept(ts->ssl);
     else
         ret = SSL_connect(ts->ssl);
 
-    if (ret != 1) {
-        int ssl_err = SSL_get_error(ts->ssl, ret);
-        const char *detail = "";
-        if (ssl_err == SSL_ERROR_SSL)
-            detail = ERR_error_string(ERR_get_error(), NULL);
-        else if (ssl_err == SSL_ERROR_SYSCALL)
-            detail = strerror(errno);
-        snprintf(ch->errbuf, sizeof(ch->errbuf),
-                 "TLS handshake failed: %s (ssl_err=%d)",
-                 detail, ssl_err);
-        return -1;
+    if (ret == 1) {
+        /* success */
+        ts->handshake_done = 1;
+        ts->hs_state = TLS_HS_DONE;
+        return 0;
     }
 
-    ts->handshake_done = 1;
-    return 0;
+    /* handshake not yet complete */
+    int ssl_err = SSL_get_error(ts->ssl, ret);
+
+    if (is_nonblock) {
+        switch (ssl_err) {
+        case SSL_ERROR_WANT_READ:
+            ts->hs_state = TLS_HS_WANT_READ;
+            return 1;  /* caller should wait for EPOLLIN */
+        case SSL_ERROR_WANT_WRITE:
+            ts->hs_state = TLS_HS_WANT_WRITE;
+            return 1;  /* caller should wait for EPOLLOUT */
+        default:
+            break;  /* fatal error */
+        }
+    }
+
+    /* fatal error (or blocking socket error) */
+    ts->hs_state = TLS_HS_FAILED;
+    const char *detail = "";
+    if (ssl_err == SSL_ERROR_SSL)
+        detail = ERR_error_string(ERR_get_error(), NULL);
+    else if (ssl_err == SSL_ERROR_SYSCALL)
+        detail = strerror(errno);
+    else if (ssl_err == SSL_ERROR_WANT_READ)
+        detail = "WANT_READ (socket not non-blocking?)";
+    else if (ssl_err == SSL_ERROR_WANT_WRITE)
+        detail = "WANT_WRITE (socket not non-blocking?)";
+    snprintf(ch->errbuf, sizeof(ch->errbuf),
+             "TLS handshake failed: %s (ssl_err=%d)",
+             detail, ssl_err);
+    return -1;
+}
+
+/* Public: return the non-blocking handshake state.
+ * Returns TLS_HS_DONE (0) when complete, TLS_HS_WANT_READ/WRITE
+ * when more I/O is needed, TLS_HS_FAILED on error. */
+int xlink_tls_handshake_state(xlink_channel_t *ch) {
+    if (!ch || !ch->tls) return TLS_HS_DONE;
+    tls_state_t *ts = (tls_state_t *)ch->tls;
+    return (int)ts->hs_state;
+}
+
+/* Public: continue a non-blocking handshake.
+ * Call this from xlink_run() event callback when fd becomes read/writable.
+ * Returns 0 on completion, 1 if more I/O needed, -1 on fatal error. */
+int xlink_tls_handshake_continue(xlink_channel_t *ch) {
+    if (!ch || !ch->tls) return -1;
+    tls_state_t *ts = (tls_state_t *)ch->tls;
+    if (ts->handshake_done || !ts->configured) return 0;
+    return tls_do_handshake(ch, ts);
 }
 
 /* ─── Internal: TLS I/O (called by tcp_backend.c) ─────── */

@@ -841,7 +841,66 @@ dependencies (no `liburing`).
 
 ---
 
-## 19. Document Cross-Reference
+## 19. TLS v2: Non-Blocking Handshake (`src/tls.c`, 2026-07-10)
+
+### 19.1 Motivation
+
+v1 TLS handshake (`tls_do_handshake`) is **blocking**: on a non-blocking socket,
+`SSL_accept()` or `SSL_connect()` may return `SSL_ERROR_WANT_READ` or
+`SSL_ERROR_WANT_WRITE`, but v1 treats every non-success return as a fatal error.
+
+v2 adds proper non-blocking handshake support — the foundation for integrating
+TLS with `xlink_run()` event loops.
+
+### 19.2 New State Machine
+
+```c
+typedef enum {
+    TLS_HS_IDLE = 0,       /* handshake not started */
+    TLS_HS_WANT_READ,      /* wait for fd readable */
+    TLS_HS_WANT_WRITE,     /* wait for fd writable */
+    TLS_HS_DONE,           /* handshake complete */
+    TLS_HS_FAILED          /* fatal error */
+} tls_hs_state_t;
+```
+
+### 19.3 Core: `tls_do_handshake()` (improved)
+
+- Auto-detects socket non-blocking mode via `fcntl(fd, F_GETFL)`
+- Blocking sockets: returns 0 (done) or -1 (error) — backward compatible
+- Non-blocking sockets: returns 0 (done), 1 (WANT_READ/WRITE), or -1 (fatal)
+- On WANT_READ: sets `ts->hs_state = TLS_HS_WANT_READ`
+- On WANT_WRITE: sets `ts->hs_state = TLS_HS_WANT_WRITE`
+
+### 19.4 New Public API
+
+```c
+/* Get current handshake state (IDLE/WANT_READ/WANT_WRITE/DONE/FAILED) */
+int xlink_tls_handshake_state(xlink_channel_t *ch);
+
+/* Continue a non-blocking handshake step.
+ * Returns 0=done, 1=more I/O needed, -1=fatal error. */
+int xlink_tls_handshake_continue(xlink_channel_t *ch);
+```
+
+### 19.5 Integration with xlink_run() (planned)
+
+The remaining integration:
+1. `xlink_run()` checks `handshake_state` for each channel before event loop
+2. Channels in `WANT_READ`/`WANT_WRITE` are registered with epoll for the right events
+3. On event: call `xlink_tls_handshake_continue()` → update state → loop
+4. On `TLS_HS_DONE`: transition to normal read/write mode
+5. On `TLS_HS_FAILED`: fire error callback
+
+### 19.6 Bug Fix: Forward Declaration
+
+`tcp_backend.c` had `static void *tls_clone_for_client(...)` — but the function
+is defined in `tls.c` as global. Changed to `extern`. Was silently accepted by
+GCC in -O0 but flagged as `used but never defined` with `-O2 -Wall`.
+
+---
+
+## 20. Document Cross-Reference
 
 | Document | What it covers | Read when |
 |----------|---------------|-----------|

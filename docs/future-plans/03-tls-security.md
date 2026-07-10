@@ -337,6 +337,21 @@ typedef struct xlink_tls_config {
 - **Blocking I/O**：当前使用阻塞式 `SSL_read`/`SSL_write`（v1 简化）
 
 ### 已知限制
-- 服务器多客户端 TLS 复用同一个 SSL 对象（Per-client TLS 待实现）
-- 无异步 TLS 握手（blocking socket）
+- ~~服务器多客户端 TLS 复用同一个 SSL 对象~~ → ✅ Per-client TLS (2026-07-09)
+- ~~无异步 TLS 握手（blocking socket）~~ → ✅ 非阻塞握手核心函数 (2026-07-10)
 - 无证书吊销检查（CRL/OCSP）
+
+### Phase 2 进度（2026-07-10）
+- ✅ **2.1**: Per-client TLS 映射表 (2026-07-09, commit `9d75abb`)
+- ✅ **2.2 核心**: 非阻塞握手函数 + 公共 API (2026-07-10)
+  - `tls_state_t` 新增 `tls_hs_state_t hs_state` 枚举 (IDLE/WANT_READ/WANT_WRITE/DONE/FAILED)
+  - `tls_do_handshake()` 自动检测 socket 是否为 non-blocking (`fcntl(fd, F_GETFL)` 检查 `O_NONBLOCK`)
+  - 非阻塞模式下处理 `SSL_ERROR_WANT_READ` / `SSL_ERROR_WANT_WRITE` → 返回 1 提示调用方等待
+  - 新增 `xlink_tls_handshake_state(ch)` — 返回当前握手状态
+  - 新增 `xlink_tls_handshake_continue(ch)` — 继续非阻塞握手步骤
+  - 修复: `tcp_backend.c` 中 `tls_clone_for_client` forward decl 从 `static` 改为 `extern`
+- [ ] 2.2 集成: xlink_run() 事件循环集成非阻塞握手
+- [ ] 2.3: ALPN 协商
+- [ ] 2.4: TLS 会话缓存（客户端）
+- [ ] 2.5: 补充测试
+- [ ] 2.6: 更新文档

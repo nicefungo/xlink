@@ -220,6 +220,14 @@ int xlink_tls_configure(xlink_channel_t *ch,
 /* Return non-zero if channel has TLS enabled. */
 int xlink_tls_enabled(xlink_channel_t *ch);
 
+/* Non-blocking handshake: returns current handshake state.
+ * 0 = done/not-configured, 1 = WANT_READ, 2 = WANT_WRITE, -1 = failed. */
+int xlink_tls_handshake_state(xlink_channel_t *ch);
+
+/* Continue a non-blocking TLS handshake step.
+ * Returns 0 on completion, 1 if more I/O needed, -1 on fatal error. */
+int xlink_tls_handshake_continue(xlink_channel_t *ch);
+
 #endif /* XLINK_HAS_TLS */
 
 /* ─── Error Reporting ─────────────────────────────────── */

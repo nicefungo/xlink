@@ -65,7 +65,7 @@ static int tcp_set_nodelay(int fd) {
 
 /* Forward decl for per-client TLS — defined in tls.c */
 #ifdef XLINK_HAS_TLS
-static void *tls_clone_for_client(void *ch_tls, int client_fd, xlink_channel_t *ch);
+extern void *tls_clone_for_client(void *ch_tls, int client_fd, xlink_channel_t *ch);
 #endif
 
 static void add_client(tcp_priv_t* p, int fd) {
