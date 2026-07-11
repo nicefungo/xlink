@@ -341,7 +341,7 @@ typedef struct xlink_tls_config {
 - ~~无异步 TLS 握手（blocking socket）~~ → ✅ 非阻塞握手核心函数 (2026-07-10)
 - 无证书吊销检查（CRL/OCSP）
 
-### Phase 2 进度（2026-07-10）
+### Phase 2 进度（2026-07-11）
 - ✅ **2.1**: Per-client TLS 映射表 (2026-07-09, commit `9d75abb`)
 - ✅ **2.2 核心**: 非阻塞握手函数 + 公共 API (2026-07-10)
   - `tls_state_t` 新增 `tls_hs_state_t hs_state` 枚举 (IDLE/WANT_READ/WANT_WRITE/DONE/FAILED)
@@ -350,7 +350,14 @@ typedef struct xlink_tls_config {
   - 新增 `xlink_tls_handshake_state(ch)` — 返回当前握手状态
   - 新增 `xlink_tls_handshake_continue(ch)` — 继续非阻塞握手步骤
   - 修复: `tcp_backend.c` 中 `tls_clone_for_client` forward decl 从 `static` 改为 `extern`
-- [ ] 2.2 集成: xlink_run() 事件循环集成非阻塞握手
+- ✅ **2.2 集成**: xlink_run() 事件循环集成非阻塞握手 (2026-07-11)
+  - `src/aio.c` 中 `xlink_run()` 新增 TLS handshake 驱动逻辑（`#ifdef XLINK_HAS_TLS`）
+  - `tls_find_pending()` — 遍历 channels 寻找未完成握手的 channel
+  - `tls_handshake_step()` — 调用 `tls_handshake_continue()` 后用 select() 等待所需方向的 fd
+  - 握手完成/失败通过 callback 通知用户，握手成功后可立即开始 TLS 数据读写
+  - 新增 `test_tls_run.c` — 非阻塞 TLS + xlink_run 集成测试（2 test cases）
+  - 非 TLS 构建路径不受影响（`make all` 0 warnings, 331 tests pass）
+  - TLS 构建路径 0 warnings (both `make tls` full rebuild)
 - [ ] 2.3: ALPN 协商
 - [ ] 2.4: TLS 会话缓存（客户端）
 - [ ] 2.5: 补充测试

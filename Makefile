@@ -39,7 +39,7 @@ bin/%.tls.o: $(SRCDIR)/%.c
 $(TLS_LIB): $(TLS_OBJS)
 	$(AR) rcs $(TLS_LIB) $(TLS_OBJS)
 
-TEST_SRCS = $(filter-out tests/test_tls.c, $(wildcard tests/test_*.c))
+TEST_SRCS = $(filter-out tests/test_tls.c tests/test_tls_run.c, $(wildcard tests/test_*.c))
 TEST_BINS = $(patsubst tests/%.c, bin/tests/%, $(TEST_SRCS))
 
 tests: lib $(TEST_BINS) mock_plugin
@@ -58,11 +58,12 @@ bin/tests/%: tests/%.c
 tls_tests: $(TLS_LIB)
 	@mkdir -p bin/tests
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) $(INCS) -o bin/tests/test_tls tests/test_tls.c $(TLS_LIB) $(LDLIBS) $(TLS_LDLIBS)
-	@echo "=== TLS test built ==="
+	$(CC) $(CFLAGS) $(TLS_CFLAGS) $(INCS) -o bin/tests/test_tls_run tests/test_tls_run.c $(TLS_LIB) $(LDLIBS) $(TLS_LDLIBS)
+	@echo "=== TLS tests built ==="
 
 test: tests
 	@for t in bin/tests/*; do \
-		case "$$t" in *.so|*.tls.o) continue ;; esac; \
+		case "$$t" in *.so|*.tls.o|*test_tls*|*test_tls_run*) continue ;; esac; \
 		echo "--- $$t ---"; \
 		$$t || true; \
 	done

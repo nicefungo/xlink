@@ -227,6 +227,69 @@ int xlink_wait_aio(xlink_channel_t **chans, int n,
                              (xlink_aio_t *)aio_engine);
 }
 
+#ifdef XLINK_HAS_TLS
+/* ─── TLS handshake integration helpers ────────────────── */
+
+#include <sys/select.h>
+
+/* Check if any channel has a pending non-blocking TLS handshake.
+ * Returns channel index (0..n-1) if one found, -1 if none. */
+static int tls_find_pending(xlink_channel_t **chans, int n) {
+    for (int i = 0; i < n; i++) {
+        int hs = xlink_tls_handshake_state(chans[i]);
+        if (hs > 0)  /* WANT_READ=1 or WANT_WRITE=2 */
+            return i;
+    }
+    return -1;
+}
+
+/* Continue a non-blocking TLS handshake on the given channel.
+ * Called repeatedly: tries to make progress, waits via select() if
+ * the handshake needs more I/O.  Returns:
+ *   0 = handshake complete (TLS_HS_DONE), call cb
+ *   1 = waiting (timed out on select, next loop iteration will retry)
+ *  -1 = handshake failed (TLS_HS_FAILED), call cb */
+static int tls_handshake_step(xlink_channel_t *ch, int slice_ms) {
+    int hs;
+
+    /* Attempt handshake progress */
+    int ret = xlink_tls_handshake_continue(ch);
+    if (ret == 0) return 0;     /* done */
+    if (ret == -1) return -1;    /* failed */
+
+    /* ret == 1: needs more I/O.  Determine direction. */
+    hs = xlink_tls_handshake_state(ch);
+
+    int fd = ch->fd;
+    fd_set rfds, wfds;
+    FD_ZERO(&rfds);
+    FD_ZERO(&wfds);
+    if (hs == 1 /* WANT_READ */)
+        FD_SET(fd, &rfds);
+    else if (hs == 2 /* WANT_WRITE */)
+        FD_SET(fd, &wfds);
+    else  /* shouldn't happen if ret==1, but be defensive */
+        FD_SET(fd, &rfds);
+
+    struct timeval tv;
+    tv.tv_sec  = slice_ms / 1000;
+    tv.tv_usec = (slice_ms % 1000) * 1000;
+
+    int n = select(fd + 1, &rfds, &wfds, NULL, &tv);
+    if (n < 0) {
+        /* select error — treat as handshake failure */
+        return -1;
+    }
+    if (n == 0) return 1;      /* timed out — try again later */
+
+    /* fd is ready — try handshake again immediately */
+    ret = xlink_tls_handshake_continue(ch);
+    if (ret == 0) return 0;     /* done */
+    if (ret == -1) return -1;   /* failed after select wake */
+    return 1;                   /* still needs more I/O */
+}
+#endif /* XLINK_HAS_TLS */
+
 /* ─── xlink_run() — event-driven main loop ────────────── */
 
 int xlink_run(xlink_channel_t **chans, int n,
@@ -249,6 +312,60 @@ int xlink_run(xlink_channel_t **chans, int n,
         clock_gettime(CLOCK_MONOTONIC, &start_ts);
 
     for (;;) {
+#ifdef XLINK_HAS_TLS
+        /* ─── TLS handshake integration ───────────────
+         * Drive any pending non-blocking TLS handshake before
+         * checking for data.  tls_handshake_step() makes progress
+         * and waits via select() when needed. */
+        int hsp = tls_find_pending(chans, n);
+        if (hsp >= 0) {
+            int slice_ms = (remaining_ms < 0) ? 100 :
+                           (remaining_ms > 100 ? 100 : remaining_ms);
+
+            int ret = tls_handshake_step(chans[hsp], slice_ms);
+
+            /* Account for time spent in select() */
+            if (timeout_ms >= 0) {
+                struct timespec now;
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                int64_t elapsed = (now.tv_sec - start_ts.tv_sec) * 1000
+                                + (now.tv_nsec - start_ts.tv_nsec) / 1000000;
+                if (elapsed >= timeout_ms) {
+                    if (aio != (xlink_aio_t *)aio_engine)
+                        xlink_aio_destroy_impl(aio);
+                    return -1;
+                }
+                remaining_ms = timeout_ms - (int)elapsed;
+            }
+
+            if (ret == 0) {
+                /* Handshake complete — deliver to callback */
+                int rc = cb(chans, n, hsp, arg);
+                if (rc != 0) {
+                    if (aio != (xlink_aio_t *)aio_engine)
+                        xlink_aio_destroy_impl(aio);
+                    return 0;
+                }
+                last_stale_idx = -1;
+                continue;
+            } else if (ret == -1) {
+                /* Handshake failed — notify callback */
+                int rc = cb(chans, n, hsp, arg);
+                if (rc != 0) {
+                    if (aio != (xlink_aio_t *)aio_engine)
+                        xlink_aio_destroy_impl(aio);
+                    return 0;
+                }
+                last_stale_idx = -1;
+                continue;
+            }
+            /* ret == 1: still waiting (select timed out).
+             * Loop back; tls_find_pending will find it again. */
+            last_stale_idx = -1;
+            continue;
+        }
+#endif /* XLINK_HAS_TLS */
+
         /* First check: any channel with pending peek data?
          * Skip the channel that already had peek data last round
          * and whose data wasn't consumed — prevents busy-loop when
