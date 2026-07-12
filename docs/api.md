@@ -61,6 +61,30 @@ int xlink_send(xlink_channel_t* ch, const void* data, size_t len);
 
 ---
 
+## xlink_send_batch
+
+```c
+typedef struct {
+    const void *data;
+    size_t      len;
+} xlink_msg_t;
+
+int xlink_send_batch(xlink_channel_t* ch,
+                     const xlink_msg_t* msgs, int count);
+```
+
+批量发送多条消息。
+
+- 一次调用发送多条消息，减少系统调用次数
+- 每条消息独立添加帧头（4 字节长度前缀）
+- 返回成功发送的消息数（0..count），失败时返回部分已发送数
+- 对于 SHM 后端：单槽缓冲意味着每条消息会被后续消息覆盖，批量发送在并发消费场景更有意义
+- 对于 TCP/Pipe 后端：逐条写入，流式顺序到达
+
+返回已发送消息数，-1 表示参数错误。
+
+---
+
 ## xlink_recv
 
 ```c

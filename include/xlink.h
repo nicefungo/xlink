@@ -128,6 +128,23 @@ size_t xlink_plugin_count(void);
  */
 int xlink_send(xlink_channel_t* ch, const void* data, size_t len);
 
+/* Batch message descriptor. */
+typedef struct {
+    const void *data;
+    size_t      len;
+} xlink_msg_t;
+
+/* Send multiple framed messages in one call.
+ * Each message is sent with its own 4-byte length prefix.
+ * For SHM: single FIFO notification after all messages.
+ * For TCP: single writev() call with all frames.
+ *
+ * Returns number of messages successfully sent (0..count),
+ * or -1 if no channel backend supports batching.
+ */
+int xlink_send_batch(xlink_channel_t* ch,
+                     const xlink_msg_t* msgs, int count);
+
 /* Receive a framed message.
  *   *len  = capacity of buf on entry, actual size on return.
  * Returns 0 on success, -1 on error / timeout.

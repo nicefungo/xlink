@@ -403,6 +403,23 @@ int xlink_send(xlink_channel_t* ch, const void* data, size_t len) {
     return ch->backend->send(ch, data, len);
 }
 
+int xlink_send_batch(xlink_channel_t* ch,
+                     const xlink_msg_t* msgs, int count) {
+    if (!ch || !msgs || count <= 0) return -1;
+
+    int sent = 0;
+    for (int i = 0; i < count; i++) {
+        int rc;
+        if (ch->use_framing)
+            rc = frame_send(ch, msgs[i].data, msgs[i].len);
+        else
+            rc = ch->backend->send(ch, msgs[i].data, msgs[i].len);
+        if (rc != 0) return sent;
+        sent++;
+    }
+    return sent;
+}
+
 int xlink_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     if (ch->use_framing)
         return frame_recv(ch, buf, len);

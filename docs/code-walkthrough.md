@@ -146,7 +146,7 @@ This means for TCP:
 
 ---
 
-## 4. Core Dispatch: xlink_send / xlink_recv
+## 4. Core Dispatch: xlink_send / xlink_recv / xlink_send_batch
 
 ```c
 // src/xlink.c
@@ -160,6 +160,14 @@ int xlink_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     if (ch->use_framing)
         return frame_recv(ch, buf, len);        // core: read_exact(4-byte header) + payload
     return ch->backend->recv(ch, buf, len);     // backend vtable
+}
+
+int xlink_send_batch(xlink_channel_t* ch,
+                     const xlink_msg_t* msgs, int count) {
+    // Loop: send each message via frame_send() or backend->send()
+    // Returns number successfully sent, -1 on invalid args
+    // For SHM: single-slot limitation means each write overwrites previous
+    // For TCP/Pipe: messages stream sequentially in order
 }
 ```
 
