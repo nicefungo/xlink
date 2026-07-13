@@ -145,6 +145,18 @@ typedef struct {
 int xlink_send_batch(xlink_channel_t* ch,
                      const xlink_msg_t* msgs, int count);
 
+/* Receive multiple framed messages in one call.
+ * Each buffer in msgs[].data must be pre-allocated with msgs[].len bytes.
+ * On return, msgs[].len is updated to the actual message size.
+ * Returns number of messages successfully received (0..count),
+ * or -1 on error. Returns 0 when no messages are available.
+ *
+ * This is a non-blocking batch — callers should use xlink_wait()
+ * or xlink_wait_aio() to detect data before invoking this function.
+ */
+int xlink_recv_batch(xlink_channel_t* ch,
+                     xlink_msg_t* msgs, int count);
+
 /* Receive a framed message.
  *   *len  = capacity of buf on entry, actual size on return.
  * Returns 0 on success, -1 on error / timeout.

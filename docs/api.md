@@ -85,6 +85,23 @@ int xlink_send_batch(xlink_channel_t* ch,
 
 ---
 
+## xlink_recv_batch
+
+```c
+int xlink_recv_batch(xlink_channel_t* ch,
+                     xlink_msg_t* msgs, int count);
+```
+
+批量接收多条消息（非阻塞）。
+
+- 每条消息的 buffer 需预分配（`msgs[i].data` 已分配，`msgs[i].len` 为容量）
+- 成功时 `msgs[i].len` 被更新为实际消息大小
+- 内部先 peek 检查是否有可用数据，peek 为空立即返回
+- 返回实际接收的消息数（0..count），-1 表示参数错误
+- 配对 `xlink_send_batch()` 使用，构成完整批量收发
+
+---
+
 ## xlink_recv
 
 ```c

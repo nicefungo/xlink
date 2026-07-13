@@ -71,10 +71,11 @@ setsockopt(fd, IPPROTO_TCP, TCP_CORK, &on, sizeof(on));
 ### Phase 1: 批量化
 
 - [x] `xlink_send_batch()` API 设计 + SHM 后端实现（2026-07-12）
-- [ ] `xlink_recv_batch()` API 设计 + SHM 后端实现
+- [x] `xlink_recv_batch()` API 设计 + SHM 后端实现（2026-07-13）
 - [ ] TCP 后端 `writev()` 批量发送
 - [ ] 基准测试：单条 vs 批量吞吐量对比
 - [x] 测试：`xlink_send_batch()` 基础测试（2026-07-12）
+- [x] 测试：`xlink_recv_batch()` 基础测试（2026-07-13）
 
 ### Phase 2: Zero-Copy
 

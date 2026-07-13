@@ -420,6 +420,35 @@ int xlink_send_batch(xlink_channel_t* ch,
     return sent;
 }
 
+int xlink_recv_batch(xlink_channel_t* ch,
+                     xlink_msg_t* msgs, int count) {
+    if (!ch || !msgs || count <= 0) return -1;
+
+    int recvd = 0;
+    for (int i = 0; i < count; i++) {
+        if (!msgs[i].data || msgs[i].len == 0) return -1;
+
+        /* Non-destructive peek: bail if no data waiting */
+        if (ch->use_framing) {
+            size_t avail = 0;
+            if (ch->backend->peek && ch->backend->peek(ch, &avail) == 0
+                && avail == 0)
+                break;
+        }
+
+        size_t sz = msgs[i].len;
+        int rc;
+        if (ch->use_framing)
+            rc = frame_recv(ch, (void *)msgs[i].data, &sz);
+        else
+            rc = ch->backend->recv(ch, (void *)msgs[i].data, &sz);
+        if (rc != 0) break;   /* no more data or error */
+        msgs[i].len = sz;
+        recvd++;
+    }
+    return recvd;
+}
+
 int xlink_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     if (ch->use_framing)
         return frame_recv(ch, buf, len);
