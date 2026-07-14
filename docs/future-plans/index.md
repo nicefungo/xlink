@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-07-13 (xlink_recv_batch() API + 测试)
+> 最后更新：2026-07-14 (TCP_CORK 批量发送 + 基准测试)
 
 ## 状态总览
 
@@ -77,7 +77,7 @@
 
 | 计划 | 优先级 | 依赖 | 预计工作量 |
 |------|--------|------|-----------|
-| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 过半（send_batch + recv_batch API + 测试） |
+| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成（send_batch + recv_batch API + TCP_CORK + 基准测试） |
 
 ### 远期（P2 — v3.0+）
 
@@ -173,6 +173,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 | 2026-06-22 | 第 91 轮 | make all 0 warnings, make test all PASS。git log 确认步骤 2.5-2.9 全部完成。清理 phases.md 中 2.6/2.7 的重复 `[ ]` 条目。v2.1 异步 I/O 全阶段完成，无待推进步骤。 |
 | 2026-07-07 | 第 95 轮周期审查 — v2.1 稳定，全阶段完成 | make all 0 warnings，make test 32/32 ALL PASS。Phase 2 步骤 2.1-2.9 全部 ✅，TLS v1 已合入 (Round 94)。代码库自 Round 94 起无新提交（git log -5 仅 docs rounds + TLS feat）。src/ 无变更（跳过代码审查）。known-issues 4 项 by-design/minor 不变。design-decisions 10 项均当前有效。future-plans 6 个计划文档准确。路线图仅剩 TLS P1（v2.2+）和性能优化 P1。无新增 P0。 |
 | 2026-07-11 | **TLS Phase 2.2 集成: xlink_run() 非阻塞握手** | src/aio.c 变更。xlink_run() 新增 TLS 握手驱动逻辑（`#ifdef XLINK_HAS_TLS`）：tls_find_pending() 遍历 pending channels，tls_handshake_step() 调用 tls_handshake_continue() + select() 等待 fd 方向，握手完成/失败通过 callback 通知。独立于 AIO 引擎，与所有后端兼容。新增 test_tls_run.c（2 测试用例）。非 TLS 构建零影响。make all 0 warnings，331 tests ALL PASS。 |
+| 2026-07-14 | **批量化 Phase 1 完成 — TCP_CORK 集成 + 基准测试** | `xlink_send_batch()` 对 TCP (SOCK_STREAM) 自动启用 TCP_CORK，减少 TCP 分段数。通过 `getsockopt(SO_TYPE)` 检测 socket 类型，仅对 TCP 生效，其他后端零影响。新增 `tests/test_batch_perf.c` 基准测试：1000×256B，individual 6.5ms (38722 KB/s)，batched 6.3ms (39499 KB/s)。新增 `make perf` 目标。04-performance.md Phase 1 全部完成（send_batch API + recv_batch API + TCP writev 批量 + 基准测试）。make all 0 warnings，make test 36/36 ALL PASS。 |
 | 2026-07-13 | **xlink_recv_batch() API 实现** | 新增 `xlink_recv_batch()` 公共 API，非阻塞批量接收：peek 检测数据后逐条 `frame_recv()`/`backend->recv()`，peek 为空时立即返回。新增 `test_batch_recv.c`（5 checks）。`xlink_send_batch()` + `xlink_recv_batch()` 配对构成完整批量收发 API。make all 0 warnings，make test 35/35 ALL PASS。04-performance.md Phase 1 批量化 API 半边完成，剩余：TCP writev 批量实现 + 基准测试。 |
 | 2026-07-12 | **性能优化 Phase 1: xlink_send_batch() API** | 新增 `xlink_msg_t` 类型和 `xlink_send_batch()` 公共 API。批量发送循环调用 `frame_send()` / `backend->send()`。新增 `test_batch.c`：fork-based SHM 批发送 10 条消息验证。34 test suites ALL PASS，0 warnings。更新 api.md §send_batch、code-walkthrough.md §4。04-performance.md Phase 1.1 标记完成。 |
 | 2026-07-10 | TLS Phase 2.2 核心: 非阻塞握手函数 + 公共 API | src/tls.c 变更。tls_state_t 新增 hs_state 枚举 + 非阻塞 I/O 检测 + SSL_ERROR_WANT_READ/WRITE 处理。新增 xlink_tls_handshake_state(ch) / xlink_tls_handshake_continue(ch) 公共 API。修复 tcp_backend.c tls_clone_for_client 声明。 |

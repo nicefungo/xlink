@@ -72,8 +72,8 @@ setsockopt(fd, IPPROTO_TCP, TCP_CORK, &on, sizeof(on));
 
 - [x] `xlink_send_batch()` API 设计 + SHM 后端实现（2026-07-12）
 - [x] `xlink_recv_batch()` API 设计 + SHM 后端实现（2026-07-13）
-- [ ] TCP 后端 `writev()` 批量发送
-- [ ] 基准测试：单条 vs 批量吞吐量对比
+- [x] TCP 后端 `writev()` 批量发送（2026-07-14，使用 TCP_CORK）
+- [x] 基准测试：单条 vs 批量吞吐量对比（2026-07-14，test_batch_perf.c）
 - [x] 测试：`xlink_send_batch()` 基础测试（2026-07-12）
 - [x] 测试：`xlink_recv_batch()` 基础测试（2026-07-13）
 
@@ -87,7 +87,7 @@ setsockopt(fd, IPPROTO_TCP, TCP_CORK, &on, sizeof(on));
 
 ### Phase 3: 优化
 
-- [ ] TCP CORK / MSG_MORE 策略自动检测
+- [x] TCP CORK / MSG_MORE 策略自动检测（2026-07-14，已集成到 `xlink_send_batch()`）
 - [ ] 自适应批量化（根据消息频率动态调整 batch size）
 - [ ] 多核场景下的生产者-消费者优化
 - [ ] CPU 缓存友好（消息对齐、cacheline padding）

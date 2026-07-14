@@ -76,7 +76,12 @@ stress: lib
 		$$t; \
 	done
 
+perf: lib
+	@mkdir -p bin/tests
+	$(CC) $(CFLAGS) $(INCS) -o bin/tests/test_batch_perf tests/test_batch_perf.c $(LIB) $(LDLIBS)
+	./bin/tests/test_batch_perf
+
 clean:
 	rm -rf bin
 
-.PHONY: all lib tests test tls tls_tests stress clean
+.PHONY: all lib tests test tls tls_tests stress perf clean

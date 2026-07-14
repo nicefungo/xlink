@@ -5,7 +5,10 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <sys/socket.h>
 #include <sys/poll.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <time.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -407,6 +410,21 @@ int xlink_send_batch(xlink_channel_t* ch,
                      const xlink_msg_t* msgs, int count) {
     if (!ch || !msgs || count <= 0) return -1;
 
+    /* TCP_CORK coalesces multiple writev() calls into fewer TCP segments.
+     * Enabled only for SOCK_STREAM fds (TCP), has no effect on other backends. */
+    int tcp_corked = 0;
+    if (ch->use_framing && ch->fd >= 0) {
+        int stype = 0;
+        socklen_t slen = sizeof(stype);
+        if (getsockopt(ch->fd, SOL_SOCKET, SO_TYPE,
+                       &stype, &slen) == 0 && stype == SOCK_STREAM) {
+            int on = 1;
+            if (setsockopt(ch->fd, IPPROTO_TCP, TCP_CORK,
+                           &on, sizeof(on)) == 0)
+                tcp_corked = 1;
+        }
+    }
+
     int sent = 0;
     for (int i = 0; i < count; i++) {
         int rc;
@@ -414,9 +432,22 @@ int xlink_send_batch(xlink_channel_t* ch,
             rc = frame_send(ch, msgs[i].data, msgs[i].len);
         else
             rc = ch->backend->send(ch, msgs[i].data, msgs[i].len);
-        if (rc != 0) return sent;
+        if (rc != 0) {
+            if (tcp_corked) {
+                int off = 0;
+                setsockopt(ch->fd, IPPROTO_TCP, TCP_CORK,
+                           &off, sizeof(off));
+            }
+            return sent;
+        }
         sent++;
     }
+
+    if (tcp_corked) {
+        int off = 0;
+        setsockopt(ch->fd, IPPROTO_TCP, TCP_CORK, &off, sizeof(off));
+    }
+
     return sent;
 }
 
