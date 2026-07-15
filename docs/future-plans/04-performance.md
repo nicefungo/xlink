@@ -79,11 +79,193 @@ setsockopt(fd, IPPROTO_TCP, TCP_CORK, &on, sizeof(on));
 
 ### Phase 2: Zero-Copy
 
-- [ ] `xlink_zc_buf_t` 接口定义
-- [ ] SHM 后端 zero-copy（共享内存传递指针）
-- [ ] TCP 后端 `MSG_ZEROCOPY`（Linux 4.14+）
-- [ ] 文件后端 `splice()` / `copy_file_range()`
-- [ ] 基准测试：zero-copy vs 标准拷贝延迟对比
+> **设计深化: 2026-07-15** — 补充完整接口定义、完成通知机制、各后端伪代码、所有权语义
+
+#### 2.1 核心接口定义
+
+```c
+/* ── 零拷贝缓冲区 ── */
+typedef struct xlink_zc_buf {
+    void   *addr;        /* 数据起始地址 */
+    size_t  len;         /* 数据长度 */
+    int     fd;          /* 可选 backing fd（memfd/shm/regular file） */
+    uint64_t tag;        /* 用户自定义 tag（用于完成通知匹配） */
+} xlink_zc_buf_t;
+
+/* ── 完成回调 ── */
+typedef void (*xlink_zc_done_fn)(xlink_channel_t *ch,
+                                  uint64_t tag,
+                                  int status,    /* 0=成功, <0=错误 */
+                                  void *userdata);
+
+/* ── 零拷贝发送（异步） ── */
+int xlink_send_zc(xlink_channel_t *ch,
+                  xlink_zc_buf_t *buf,
+                  xlink_zc_done_fn done,
+                  void *userdata);
+
+/* ── 检查零拷贝完成状态 ── */
+int xlink_zc_poll(xlink_channel_t *ch);  /* 返回完成数，-1 出错 */
+
+/* ── 零拷贝能力查询 ── */
+int xlink_zc_capable(xlink_channel_t *ch);  /* 返回 1 表示支持 */
+```
+
+**所有权语义**：
+- 调用 `xlink_send_zc()` 后，**调用者不再拥有 `buf->addr`**，直到 `done` 回调被触发
+- `done` 回调表示内核已完成对缓冲区的引用（可以安全重用/释放）
+- 如果 `done` 回调为 NULL，使用 `xlink_zc_poll()` 轮询完成状态
+- `fd` 为可选：SHM 不需要 fd，TCP/MSG_ZEROCOPY 需要 fd 作为锚点
+
+#### 2.2 完成通知机制
+
+每个通道维护一个环形完成队列：
+
+```c
+struct zc_channel_state {
+    uint64_t           next_tag;          /* 单调递增 tag 分配器 */
+    ring_buffer_t     *done_queue;        /* 已完成 tag 列表 */
+    pthread_mutex_t    done_lock;         /* 保护 done_queue */
+    pthread_cond_t     done_cond;         /* 通知等待者 */
+    int                pending;           /* 未完成的数量 */
+};
+```
+
+通知路径：
+1. **TCP (MSG_ZEROCOPY)**: 内核通过 `SO_EE_ORIGIN_ZEROCOPY` 错误队列通知
+2. **SHM**: 对端消费后在共享内存中写入确认（或使用原有 FIFO 通知）
+3. **Pipe/File (splice)**: 同步完成，`done` 在 `xlink_send_zc()` 返回前调用
+
+#### 2.3 SHM 后端：True Zero-Copy
+
+SHM 后端的零拷贝不复制数据，只传递元数据（offset + len）：
+
+```c
+/* SHM 零拷贝在环形缓冲区中只写描述符，不拷贝 payload */
+struct shm_zc_desc {
+    uint32_t offset;    /* 在共享内存池中的偏移 */
+    uint32_t len;       /* 数据长度 */
+    uint64_t tag;       /* 用户 tag */
+};
+
+int shm_send_zc(xlink_channel_t *ch, xlink_zc_buf_t *buf,
+                xlink_zc_done_fn done, void *userdata)
+{
+    /* 1. 将 buf->addr 注册到共享内存池（如果需要） */
+    /* 2. 计算 offset = addr - pool_base */
+    /* 3. 写入 shm_zc_desc 到环形缓冲区 */
+    /* 4. 通知对端（eventfd / shm_ipc 原有机制） */
+    /* 5. 对端消费后触发完成通知 */
+}
+```
+
+对端使用 `xlink_recv_zc()` 直接访问共享内存中的数据：
+
+```c
+/* 零拷贝接收：返回指向共享内存中数据的指针 */
+int xlink_recv_zc(xlink_channel_t *ch, void **data, size_t *len);
+
+/* 释放零拷贝接收的缓冲区 */
+void xlink_recv_zc_done(xlink_channel_t *ch, void *data);
+```
+
+**性能预期**：SHM 零拷贝应该比标准 `xlink_send()` 快 3-10×（免除 `memcpy`），特别是对于大消息（4KB+）。
+
+#### 2.4 TCP 后端：MSG_ZEROCOPY（Linux 4.14+）
+
+```c
+int tcp_send_zc(xlink_channel_t *ch, xlink_zc_buf_t *buf,
+                xlink_zc_done_fn done, void *userdata)
+{
+    struct msghdr msg = {0};
+    struct iovec  iov;
+    char cmsg[CMSG_SPACE(sizeof(uint32_t))];
+
+    iov.iov_base = buf->addr;
+    iov.iov_len  = buf->len;
+
+    msg.msg_iov    = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsg;
+    msg.msg_controllen = sizeof(cmsg);
+
+    /* 设置 SO_ZEROCOPY 完成通知 */
+    struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
+    c->cmsg_level = SOL_SOCKET;
+    c->cmsg_type  = SO_EE_ORIGIN_ZEROCOPY;
+    c->cmsg_len   = CMSG_LEN(sizeof(uint32_t));
+    *(uint32_t *)CMSG_DATA(c) = (uint32_t)ch->zc.next_tag;
+
+    ssize_t n = sendmsg(ch->fd, &msg, MSG_ZEROCOPY);
+    /* ... 注册 (tag, done_fn, userdata) 到 pending map ... */
+    ch->zc.pending++;
+    return (n >= 0) ? 0 : -1;
+}
+```
+
+完成通知通过 epoll 监听 socket 错误队列（`EPOLLERR`），在错误队列中读取 `SO_EE_ORIGIN_ZEROCOPY` 事件，调用相应的 `done` 回调。
+
+**注意事项**：
+- MSG_ZEROCOPY 要求 socket `SO_ZEROCOPY` 已设置
+- 缓冲区必须页对齐 + 整页大小（否则内核仍会拷贝部分）
+- 内核引用计数管理生命周期；发送到缓冲区重用至少需 RTT/2
+- Linux 4.14+ 才稳定可用（4.18+ 推荐）
+
+#### 2.5 文件后端：splice() + copy_file_range()
+
+```c
+/* File-to-pipe: 零拷贝从文件到管道 */
+int file_send_zc(xlink_channel_t *ch, xlink_zc_buf_t *buf,
+                 xlink_zc_done_fn done, void *userdata)
+{
+    /* splice() 在 file_fd → pipe_fd 间移动页面，不拷贝 */
+    int pipefd[2];
+    pipe(pipefd);
+
+    loff_t offset = (loff_t)(uintptr_t)buf->addr; /* 文件偏移 */
+    ssize_t n = splice(buf->fd, &offset,
+                       pipefd[1], NULL, buf->len,
+                       SPLICE_F_MOVE | SPLICE_F_MORE);
+
+    /* 然后从 pipe 读回（kernel 内部零拷贝，仅操作 page cache） */
+    /* 或者直接传给 TCP socket（splice to socket） */
+    /* done 回调在 splice 完成时立即调用（同步） */
+}
+```
+
+```c
+/* File-to-file: copy_file_range() (Linux 4.5+) */
+int file_zc_copy(xlink_channel_t *ch1, xlink_channel_t *ch2,
+                 loff_t *off_in, loff_t *off_out,
+                 size_t len)
+{
+    /* 两个文件 fd 间直接在 page cache 中复制 */
+    /* NFS 4.2+ 服务端拷贝（避免回传客户端再传回去） */
+    return copy_file_range(ch1->fd, off_in,
+                           ch2->fd, off_out, len, 0);
+}
+```
+
+#### 2.6 性能预期
+
+| 后端 | 操作 | 标准路径延迟 | Zero-Copy 延迟 | 提速 |
+|------|------|-------------|-----------------|------|
+| SHM | 4KB send | ~0.035ms | ~0.008ms (estimated) | ~4× |
+| SHM | 64KB send | ~0.12ms | ~0.015ms (estimated) | ~8× |
+| TCP | 4KB send (loopback) | ~0.005ms | ~0.003ms (estimated) | ~1.5× |
+| TCP | 64KB send (loopback) | ~0.04ms | ~0.008ms (estimated) | ~5× |
+| File | 1MB copy | ~copy cost | 0 (page cache op) | ∞ |
+
+#### 2.7 实现步骤
+
+- [ ] **Step 2.1**: `xlink_zc_buf_t` + `xlink_zc_done_fn` 类型定义（`include/xlink.h`）
+- [ ] **Step 2.2**: SHM zero-copy（`src/shm_backend.c`）：`shm_send_zc` + `xlink_recv_zc` + `xlink_recv_zc_done`
+- [ ] **Step 2.3**: SHM 完成通知（eventfd / FIFO 集成）
+- [ ] **Step 2.4**: TCP MSG_ZEROCOPY（`src/tcp_backend.c`）：`tcp_send_zc` + epoll 错误队列监控
+- [ ] **Step 2.5**: File splice/copy_file_range（`src/file_backend.c`）
+- [ ] **Step 2.6**: 测试：`test_zc_shm.c`, `test_zc_tcp.c`, `test_zc_file.c`
+- [ ] **Step 2.7**: 基准测试：`test_zc_perf.c`（对比标准路径）
+- [ ] **Step 2.8**: 更新 `api.md` / `code-walkthrough.md` / `04-performance.md`
 
 ### Phase 3: 优化
 
@@ -102,9 +284,13 @@ setsockopt(fd, IPPROTO_TCP, TCP_CORK, &on, sizeof(on));
 ## 开放问题
 
 1. **API 复杂度**: 批量化 API 是否应该透明集成到现有 `xlink_send()` 中（自动合并小包）？还是暴露为独立 API？
+   → **决策 (2026-07-15)**: 暴露为独立 API（`xlink_send_batch()` / `xlink_send_zc()`），保持 `xlink_send()` 简单不伤。高级用户显式选择批量化/零拷贝路径。
 2. **Zero-Copy 所有权**: zero-copy 发送后，缓冲区何时可以重用？需要类似 `sendmsg()` 的完成通知机制。
+   → **设计 (2026-07-15)**: 采用异步完成回调 `xlink_zc_done_fn`，同时提供轮询接口 `xlink_zc_poll()` 备选。SHM 需要等对端消费完成通知；TCP MSG_ZEROCOPY 通过 epoll 错误队列通知；File splice 同步完成。
 3. **SHM vs TCP 差异**: SHM 的 zero-copy 是"真正的零拷贝"（指针传递），而 TCP 只能做到减少拷贝。这两个场景是否需要不同的 API？
+   → **决策 (2026-07-15)**: 统一 API 签名（`xlink_send_zc(ch, buf, done, userdata)`），后端差异在内部处理。用户通过 `xlink_zc_capable()` 查询能力，不需要知道后端细节。
 4. **批量化与延迟的 trade-off**: 批量化提高吞吐但增加延迟。是否需要用户可控的 flush 策略？
+   → 仍然开放。备选方案：`xlink_flush(ch)` 显式 flush，或 `XLINK_BATCH_TIMEOUT` 配置最大等待时间。
 
 ## 关联文档
 

@@ -229,3 +229,64 @@ channels are single-writer/single-reader by design.
 **Alternatives considered**: Passing TLS state as an extra parameter to every
 framing function — cleaner architecturally but doubles the parameter count
 across 4 functions. The swap pattern is uglier but contained.
+
+---
+
+## 11. Zero-Copy API: Unified Signature, Backend-Internal Differentiation
+
+**Where**: `include/xlink.h` (planned), `04-performance.md` Phase 2 design
+
+**What**: `xlink_send_zc()` exposes a single API signature across all backends,
+but each backend implements zero-copy differently: SHM passes pointer metadata
+(offset + len in shared memory), TCP uses `MSG_ZEROCOPY` (kernel page
+pinning), File uses `splice()`/`copy_file_range()` (page cache manipulation).
+
+**Why**:
+- Users don't need to know backend-specific zero-copy mechanics. The API
+  contracts are: (1) give me your buffer, (2) I'll tell you when it's safe to
+  reuse via the `done` callback.
+- A split API (`xlink_send_zc_shm()`, `xlink_send_zc_tcp()`) would require the
+  caller to know the backend type, breaking the channel abstraction.
+- SHM zero-copy (pointer pass) and TCP zero-copy (kernel pin) are unified by
+  the completion notification: both paths signal "buffer is free" through the
+  same `xlink_zc_done_fn` callback.
+
+**Trade-off**: SHM could theoretically return instantly (it's just a metadata
+write) while TCP MSG_ZEROCOPY completion depends on the peer's TCP ACK. The
+unified API means SHM callers still pay the async callback overhead even though
+the operation is effectively synchronous. Callers can use `xlink_zc_poll()` as
+a lightweight alternative.
+
+**Alternatives considered**:
+1. **Per-backend zero-copy functions** — cleaner per-backend semantics (SHM
+   trivially sync, TCP truly async) but leaks backend type to the user.
+   Violates the xlink channel abstraction.
+2. **`xlink_send()` flag `XLINK_ZEROCOPY`** — blends zero-copy into the
+   existing send path, but `xlink_send()` is synchronous (returns bytes sent)
+   while zero-copy is inherently asynchronous. The impedance mismatch would
+   force either a blocking wait or a dropped return value.
+
+---
+
+## 12. Batch API Independent from xlink_send()
+
+**Where**: `include/xlink.h`, `04-performance.md` Phase 1
+
+**What**: `xlink_send_batch()` and `xlink_send_zc()` are separate APIs, not
+flags or modes on the existing `xlink_send()`.
+
+**Why**:
+- `xlink_send()` is the "it just works" path with minimal cognitive overhead.
+  Adding flags (`XLINK_FLAG_BATCH`, `XLINK_FLAG_ZC`) would pollute every
+  single send call with complexity most users never need.
+- The batch/zc path has different semantics (message arrays, completion
+  callbacks, buffer ownership transfer) that don't map cleanly to a single
+  `const void *data, size_t len` signature.
+- Nanomsg/nng took the same approach — `nn_send()` vs `nn_sendmsg()` —
+  keeping the simple path simple.
+- Advanced users who care about throughput will look for batch/zc by name
+  rather than discovering a flag in the docs.
+
+**Trade-off**: API surface area grows. Users must explicitly choose their send
+path. A future `xlink_send_auto()` could auto-select based on message size and
+frequency, but that's optimization, not a design requirement.
