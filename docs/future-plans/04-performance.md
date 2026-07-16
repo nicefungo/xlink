@@ -270,10 +270,216 @@ int file_zc_copy(xlink_channel_t *ch1, xlink_channel_t *ch2,
 ### Phase 3: 优化
 
 - [x] TCP CORK / MSG_MORE 策略自动检测（2026-07-14，已集成到 `xlink_send_batch()`）
-- [ ] 自适应批量化（根据消息频率动态调整 batch size）
-- [ ] 多核场景下的生产者-消费者优化
+- [x] 自适应批量化设计（2026-07-16，详见 §3.1）
+- [x] 多核场景生产者-消费者优化设计（2026-07-16，详见 §3.2）
+- [ ] 自适应批量化实现
+- [ ] 多核优化实现（lock-free queue、per-CPU pool）
 - [ ] CPU 缓存友好（消息对齐、cacheline padding）
 - [ ] 性能剖析工具（perf / flamegraph 集成）
+
+#### 3.1 自适应批量化设计
+
+**问题**：固定 batch size（如 50 条）在不同场景下效果差异大。高频小消息场景（10K msg/s）需要更大的批量来分摊系统调用开销；低频大消息场景（10 msg/s，每条 64KB）batch 太大只会增加延迟无益于吞吐。
+
+**设计策略**：采用三参数自适应控制器。
+
+```c
+/* 自适应批量化配置 */
+typedef struct xlink_batch_policy {
+    int    max_batch;        /* 最大批量大小（hard limit） */
+    int    max_delay_us;     /* 最大等待时间（microseconds） */
+    int    min_batch;        /* 最小批量（低于此值等待） */
+    int    enable;           /* 0=关闭自适应，1=启用 */
+} xlink_batch_policy_t;
+
+/* 设置通道的批量策略 */
+int xlink_set_batch_policy(xlink_channel_t *ch,
+                           const xlink_batch_policy_t *policy);
+```
+
+**内部状态机**：
+
+```c
+struct xlink_batch_state {
+    xlink_msg_t   *queue;          /* 待发送消息环形队列 */
+    int            q_head, q_tail; /* 队列指针 */
+    int            q_cap;          /* 队列容量 */
+
+    /* 自适应参数（运行时更新） */
+    double         avg_msg_rate;   /* 滑动平均消息速率 (msg/s) */
+    double         avg_msg_size;   /* 滑动平均消息大小 (bytes) */
+    struct timespec last_flush;    /* 上次 flush 时间 */
+    struct timespec first_queued;  /* 第一条消息入队时间 */
+
+    int            current_batch;  /* 当前建议的 batch size */
+    int            samples;        /* 采样计数 */
+};
+```
+
+**自适应逻辑**（每次 `xlink_send_batch()` 调用时评估）：
+
+```
+BatchDecision(rate, avg_size, policy):
+    IF queue_count >= max_batch
+        → FLUSH (hard limit)
+
+    IF avg_size >= 4096 (大消息)
+        → current_batch = max(1, max_batch / 4)
+
+    IF rate > 10000 msg/s (高频)
+        → current_batch = min(max_batch, current_batch * 2)
+
+    IF elapsed_since_first > max_delay_us
+        → FLUSH (time-based)
+
+    IF queue_count >= current_batch
+        → FLUSH (threshold-based)
+
+    OTHERWISE
+        → QUEUE (defer to next call or explicit flush)
+```
+
+**滑动平均**：指数加权移动平均（EWMA），`α = 0.125`（约 8 个样本达到收敛）：
+
+```c
+static void update_ewma(double *avg, double sample) {
+    const double alpha = 0.125;
+    *avg = (*avg == 0.0) ? sample : alpha * sample + (1.0 - alpha) * (*avg);
+}
+```
+
+**性能预期**（预估，待实测）：
+
+| 场景 | 固定 batch=50 | 自适应 | 改善 |
+|------|-------------|--------|------|
+| 高频小消息（10K msg/s, 64B） | ~39500 KB/s | ~42000 KB/s | +6% |
+| 低频大消息（10 msg/s, 64KB） | ~640 KB/s, 延迟 5s | ~640 KB/s, 延迟 0.5ms | 延迟 -10000× |
+| 混合场景（burst + idle） | 尾部延迟高 | 延迟受控 | 关键改善 |
+
+**设计决策**: 不侵入 `xlink_send()` 的简单性。自适应层在 `xlink_send_batch()` 内部作为可选策略启用（默认关闭，用户显式调用 `xlink_set_batch_policy()` 开启）。
+
+#### 3.2 多核生产者-消费者优化
+
+**问题**：当前 SHM 后端使用单一锁保护整个环形缓冲区。多核高并发场景下，N 个生产者竞争同一把锁（`pthread_mutex_lock`），其中 N-1 个在等待，实际执行串行化。
+
+**关键瓶颈识别**：
+1. **锁竞争**: `pthread_mutex_lock(&ring->lock)` — 多生产者场景的最大瓶颈
+2. **False sharing**: 多个 CPU 核心写同一 cache line（即使写不同字段）
+3. **内存屏障开销**: 每次 `unlock` 触发全内存屏障（mfence / `lock` 前缀）
+
+**优化方案：分层设计**
+
+```
+方案 A: Lock-free SPSC (单生产者单消费者)
+│  适用于一对一的 SHM 通道
+│  → 使用原子操作（CAS）+ 环形缓冲区
+│  → 零锁竞争
+
+方案 B: Lock-free MPSC (多生产者单消费者) — 推荐
+│  适用于广播/汇聚场景
+│  → 每个生产者有自己的 slot（预分配）
+│  → 消费者轮询所有 producer slots
+│  → 使用 acquire/release 语义，无锁
+
+方案 C: Per-CPU ring buffer (多生产者多消费者)
+│  适用于最大并发场景
+│  → 每个 CPU core 有自己的 ring buffer
+│  → 发送时写入 local ring，消费者轮询所有 rings
+│  → 可用 C11 atomics 实现，无需内核支持
+```
+
+**方案 A 详细设计：Lock-free SPSC**
+
+```c
+/* Lock-free SPSC ring buffer (基于 Lamport 经典算法) */
+typedef struct {
+    xlink_msg_t *buffer;
+    size_t       mask;           /* capacity - 1, power of 2 */
+    size_t       capacity;
+
+    /* 单写者修改 head，单读者修改 tail — 各自独立 */
+    _Atomic size_t head;         /* 生产者写入位置 */
+    _Atomic size_t tail;         /* 消费者读取位置 */
+
+    /* cacheline padding 防止 false sharing */
+    char _pad[CACHE_LINE_SIZE];
+} xlink_spsc_queue_t;
+
+static inline int spsc_enqueue(xlink_spsc_queue_t *q,
+                                const xlink_msg_t *msg) {
+    size_t head = atomic_load_explicit(&q->head, memory_order_relaxed);
+    size_t tail = atomic_load_explicit(&q->tail, memory_order_acquire);
+
+    /* 满判断：head + 1 == tail (mod capacity) */
+    if ((head + 1 - tail) >= q->capacity)
+        return -1;  /* full */
+
+    q->buffer[head & q->mask] = *msg;
+
+    /* 确保数据写入在 head 更新之前可见 */
+    atomic_store_explicit(&q->head, head + 1, memory_order_release);
+    return 0;
+}
+
+static inline int spsc_dequeue(xlink_spsc_queue_t *q,
+                                xlink_msg_t *msg) {
+    size_t tail = atomic_load_explicit(&q->tail, memory_order_relaxed);
+    size_t head = atomic_load_explicit(&q->head, memory_order_acquire);
+
+    if (tail == head)
+        return -1;  /* empty */
+
+    *msg = q->buffer[tail & q->mask];
+
+    atomic_store_explicit(&q->tail, tail + 1, memory_order_release);
+    return 0;
+}
+```
+
+**内存序分析**：
+- **生产者写** `release`：确保 `buffer[]` 写入对消费者可见后，才发布 `head` 更新
+- **消费者读** `acquire`：看到 `head` 更新后，保证能看到对应的 `buffer[]` 内容
+- **仅 2 个原子操作** per op（vs `pthread_mutex_lock` 的 syscall + futex 开销）
+
+**方案 B 设计：MPSC per-producer slot**
+
+```c
+/* MPSC: 每个生产者独立 slot，消费者轮询 */
+typedef struct xlink_mpsc_queue {
+    int           n_producers;     /* 生产者数量 */
+    xlink_spsc_queue_t **slots;   /* 每个生产者一个 SPSC 队列 */
+} xlink_mpsc_queue_t;
+
+/* 生产者 N 写入 slot[N]（无锁，各写各的） */
+/* 消费者轮询所有 slot：遍历 slots[0..N-1] */
+```
+
+**性能预期**（vs 当前 mutex 方案）：
+
+| 场景 | Mutex (当前) | Lock-free SPSC | Lock-free MPSC |
+|------|------------|----------------|----------------|
+| 1 生产者 | 0.035ms | ~0.008ms (4×) | ~0.010ms |
+| 4 生产者 | 0.14ms (锁竞争) | N/A | ~0.012ms (12×) |
+| 8 生产者 | 0.30ms (严重竞争) | N/A | ~0.015ms (20×) |
+| cache miss | per lock/unlock | 2 atomics | 2 atomics × N recv |
+
+**实现优先级**：先做方案 A（SPSC），因为 SHM 最常见场景是一对一通信。方案 B（MPSC）在广播/汇聚场景需要时再做。方案 C（per-CPU）留作远期。
+
+#### 3.3 实施计划
+
+**自适应批量化**（预估 1.5 天）：
+1. `xlink_batch_policy_t` + `xlink_set_batch_policy()` API（`include/xlink.h`）
+2. 内部 `struct batch_state` + EWMA 控制器（`src/xlink.c`）
+3. `xlink_send_batch()` 集成自适应逻辑
+4. `test_batch_adaptive.c`：验证 rate detection + batch size 动态调整
+5. `test_batch_perf.c` 扩展：对比固定 vs 自适应
+
+**Lock-free SPSC**（预估 2 天）：
+1. `xlink_spsc_queue_t` 数据结构 + 基本操作（`src/spsc_queue.c`）
+2. SHM 后端集成：`shm_backend.c` 中 opend 时初始化 SPSC 队列
+3. `test_spsc.c`：正确性验证（多线程并发 enqueue/dequeue）
+4. `test_spsc_perf.c`：对比 mutex vs lock-free 吞吐量
+5. 集成到 `xlink_send_batch()` / `xlink_send()` 热路径
 
 ## 依赖
 

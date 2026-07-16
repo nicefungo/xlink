@@ -77,7 +77,7 @@
 
 | 计划 | 优先级 | 依赖 | 预计工作量 |
 |------|--------|------|-----------|
-| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成（send_batch + recv_batch API + TCP_CORK + 基准测试）；🔄 Phase 2 设计深化中（Zero-Copy 接口定义 + 多后端伪代码 + 完成通知机制） |
+| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成；✅ Phase 2 设计完成（Zero-Copy 接口定义 + 完成通知 + 多后端伪代码）；🔄 Phase 3 设计中（自适应批量化 + 多核无锁队列） |
 
 ### 远期（P2 — v3.0+）
 
@@ -124,6 +124,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-07-16 | 性能优化 Phase 3 设计深化：自适应批量化 + 多核无锁队列 | 04-performance.md Phase 3 从 5 个 checked box 扩展到完整设计文档：自适应批量化控制器（EWMA 速率检测、动态 batch size、max_delay 超时）和多核优化（lock-free SPSC/MPSC、per-CPU ring buffer、C11 atomic 实现、memory ordering 分析）。自适应批量化预估高频场景 +6% 吞吐、低频大消息延迟降低 10000×。Lock-free SPSC 预期 4× 吞吐提升（vs mutex），MPSC 预期 12-20×。实现计划：自适应 1.5 天、SPSC 2 天。make all 0 warnings，make test 36/36 ALL PASS。 |
 | 2026-06-22 | 性能基准测试完成 + io_uring bug 修复 | `test_aio_perf.c` 6 个基准全部通过。修复 `aio_uring.c` 的 POLL_REMOVE CQE 泄漏 bug（`uring_unwatch` 中使用 `user_data=0` 哨兵 + 立即 drain）。新增 `docs/future-plans/06-perf-benchmarks.md` 基准报告。结果：poll 0.004ms/3515MB/s（Pipe 场景最快），epoll 0.007ms/3060MB/s，io_uring 0.004ms/3003MB/s。SHM 0.032ms，多通道 0.012ms。v2.1 全部 P0 项完成，代码库 0 warnings，32 test binaries ALL PASS。 |
 | 2026-06-19 | 第 89 轮周期审查 — v2.1 稳定维护 | make all 0 警告，make test 32/32 套件全部通过。代码库自 Round 88 起无新提交。v2.1 全部 5 个步骤（2.5-2.9）均已交付，仅剩性能基准测试。所有 docs 检查通过：known-issues 4 项 by-design/minor 不变，design-decisions 均有效，future-plans 5 个计划文档准确。无新增 P0。 |
 | 2026-06-18 | 第 88 轮周期审查 — v2.1 全部完工 | make all 0 警告，make test 32/32 套件全部通过。v2.1 全部 5 个步骤（2.5 SHM eventfd、2.6 xlink_run、2.7 io_uring、2.8 测试、2.9 文档）均已交付。index.md 路线图状态同步。src/ 无新变更，代码库稳定。仅剩性能基准测试（P0 设计中）。 |
