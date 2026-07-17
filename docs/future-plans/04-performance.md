@@ -272,7 +272,7 @@ int file_zc_copy(xlink_channel_t *ch1, xlink_channel_t *ch2,
 - [x] TCP CORK / MSG_MORE 策略自动检测（2026-07-14，已集成到 `xlink_send_batch()`）
 - [x] 自适应批量化设计（2026-07-16，详见 §3.1）
 - [x] 多核场景生产者-消费者优化设计（2026-07-16，详见 §3.2）
-- [ ] 自适应批量化实现
+- [x] 自适应批量化实现（2026-07-17，新增 `xlink_batch_policy_t` + `xlink_set_batch_policy()` + `xlink_flush_batch()` API，EWMA 自适应控制器，`test_batch_adaptive.c` 38/38 通过）
 - [ ] 多核优化实现（lock-free queue、per-CPU pool）
 - [ ] CPU 缓存友好（消息对齐、cacheline padding）
 - [ ] 性能剖析工具（perf / flamegraph 集成）

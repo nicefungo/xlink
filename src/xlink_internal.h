@@ -4,6 +4,7 @@
 #include "xlink.h"
 #include <stdint.h>
 #include <stddef.h>
+#include <time.h>
 
 /* ─── Backend operations table ────────────────────────── */
 typedef struct {
@@ -18,6 +19,31 @@ typedef struct {
     int  (*peek) (xlink_channel_t* ch, size_t* avail);
 } xlink_backend_t;
 
+/* ─── Adaptive batch state (internal) ─────────────────── */
+
+#define XLINK_BATCH_QCAP   128    /* fixed-size ring buffer for batch queue */
+
+struct xlink_batch_state {
+    /* queued messages ring buffer */
+    xlink_msg_t  queue[XLINK_BATCH_QCAP];
+    int          q_head;           /* producer index */
+    int          q_tail;           /* consumer index */
+    int          q_count;          /* number of queued messages */
+
+    /* policy */
+    xlink_batch_policy_t policy;
+
+    /* EWMA rate tracking */
+    double       avg_msg_rate;     /* EWMA: messages per second */
+    double       avg_msg_size;     /* EWMA: bytes per message */
+    int          samples;          /* number of EWMA updates */
+    int          current_batch;    /* current dynamic batch size */
+
+    /* timing */
+    struct timespec first_queued;  /* when first msg of batch was queued */
+    struct timespec last_flush;    /* last flush monotonic time */
+};
+
 /* ─── Channel struct (exposed to backends) ────────────── */
 struct xlink_channel {
     const xlink_backend_t* backend;
@@ -28,6 +54,7 @@ struct xlink_channel {
     char                   errbuf[128];
     xlink_opt_t            opt;      /* saved open options */
     void                  *tls;      /* TLS state (tls_state_t *) */
+    struct xlink_batch_state *bs;    /* adaptive batching state (NULL if disabled) */
 };
 
 /* ─── Backend declarations (defined in backend .c files) ─ */

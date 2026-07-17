@@ -406,9 +406,166 @@ int xlink_send(xlink_channel_t* ch, const void* data, size_t len) {
     return ch->backend->send(ch, data, len);
 }
 
+/* ─── Adaptive Batching: internal helpers ──────────────── */
+
+/* EWMA alpha: ~0.125 — converges in ~8 samples */
+#define BATCH_EWMA_ALPHA  0.125
+
+static double timespec_to_us(const struct timespec *ts) {
+    return (double)ts->tv_sec * 1e6 + (double)ts->tv_nsec / 1e3;
+}
+
+static void batch_ewma_update(struct xlink_batch_state *bs,
+                               int count, int total_bytes) {
+    double msg_rate = 0.0;
+    double avg_size = (double)total_bytes / (double)count;
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    double elapsed_us = timespec_to_us(&now) - timespec_to_us(&bs->last_flush);
+    if (elapsed_us > 0.0)
+        msg_rate = (double)count / (elapsed_us / 1e6);
+
+    if (bs->samples == 0) {
+        bs->avg_msg_rate = msg_rate;
+        bs->avg_msg_size = avg_size;
+    } else {
+        bs->avg_msg_rate = BATCH_EWMA_ALPHA * msg_rate
+                         + (1.0 - BATCH_EWMA_ALPHA) * bs->avg_msg_rate;
+        bs->avg_msg_size = BATCH_EWMA_ALPHA * avg_size
+                         + (1.0 - BATCH_EWMA_ALPHA) * bs->avg_msg_size;
+    }
+    bs->samples++;
+}
+
+static int batch_decide_flush(struct xlink_batch_state *bs) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    /* Hard limit: max batch reached */
+    if (bs->q_count >= bs->policy.max_batch)
+        return 1;
+
+    /* Adaptive logic: only when enabled and enough samples */
+    if (bs->policy.enable && bs->samples >= 8) {
+        /* Large messages: reduce batch size to minimize delay */
+        if (bs->avg_msg_size >= 4096.0) {
+            bs->current_batch = bs->policy.max_batch / 4;
+            if (bs->current_batch < 1) bs->current_batch = 1;
+        }
+        /* High frequency: increase batch size */
+        else if (bs->avg_msg_rate > 10000.0) {
+            bs->current_batch = bs->policy.max_batch;
+        }
+        /* Medium frequency: moderate batch */
+        else if (bs->avg_msg_rate > 1000.0) {
+            bs->current_batch = bs->policy.max_batch / 2;
+            if (bs->current_batch < bs->policy.min_batch)
+                bs->current_batch = bs->policy.min_batch;
+        } else {
+            bs->current_batch = bs->policy.min_batch;
+        }
+
+        /* Time-based flush: max_delay exceeded */
+        double elapsed_us = timespec_to_us(&now)
+                          - timespec_to_us(&bs->first_queued);
+        if (elapsed_us >= (double)bs->policy.max_delay_us)
+            return 1;
+
+        /* Threshold-based flush */
+        if (bs->q_count >= bs->current_batch)
+            return 1;
+    }
+
+    /* Non-adaptive mode: flush when above min_batch or hard limit */
+    if (bs->q_count >= bs->policy.min_batch)
+        return 1;
+
+    return 0;   /* defer */
+}
+
+static int batch_flush_internal(xlink_channel_t *ch) {
+    struct xlink_batch_state *bs = ch->bs;
+    if (!bs || bs->q_count == 0) return 0;
+
+    int corked = 0;
+    if (ch->use_framing && ch->fd >= 0) {
+        int stype = 0;
+        socklen_t slen = sizeof(stype);
+        if (getsockopt(ch->fd, SOL_SOCKET, SO_TYPE,
+                       &stype, &slen) == 0 && stype == SOCK_STREAM) {
+            int on = 1;
+            if (setsockopt(ch->fd, IPPROTO_TCP, TCP_CORK,
+                           &on, sizeof(on)) == 0)
+                corked = 1;
+        }
+    }
+
+    int total_bytes = 0, sent = 0;
+    while (bs->q_count > 0) {
+        xlink_msg_t *m = &bs->queue[bs->q_tail];
+        int rc;
+        if (ch->use_framing)
+            rc = frame_send(ch, m->data, m->len);
+        else
+            rc = ch->backend->send(ch, m->data, m->len);
+        if (rc != 0) {
+            if (corked) {
+                int off = 0;
+                setsockopt(ch->fd, IPPROTO_TCP, TCP_CORK,
+                           &off, sizeof(off));
+            }
+            return sent;   /* partial: remaining msgs stay in queue */
+        }
+        total_bytes += (int)m->len;
+        bs->q_tail = (bs->q_tail + 1) % XLINK_BATCH_QCAP;
+        bs->q_count--;
+        sent++;
+    }
+
+    if (corked) {
+        int off = 0;
+        setsockopt(ch->fd, IPPROTO_TCP, TCP_CORK, &off, sizeof(off));
+    }
+
+    /* Update EWMA after flush */
+    batch_ewma_update(bs, sent, total_bytes);
+    clock_gettime(CLOCK_MONOTONIC, &bs->last_flush);
+    return sent;
+}
+
 int xlink_send_batch(xlink_channel_t* ch,
                      const xlink_msg_t* msgs, int count) {
     if (!ch || !msgs || count <= 0) return -1;
+
+    /* Adaptive batch path: queue messages, flush when policy triggers */
+    if (ch->bs) {
+        int queued = 0;
+        for (int i = 0; i < count; i++) {
+            if (ch->bs->q_count >= XLINK_BATCH_QCAP) {
+                /* Queue full: try flush, then retry one slot */
+                batch_flush_internal(ch);
+                if (ch->bs->q_count >= XLINK_BATCH_QCAP)
+                    break;
+            }
+            if (ch->bs->q_count == 0)
+                clock_gettime(CLOCK_MONOTONIC, &ch->bs->first_queued);
+            int wp = ch->bs->q_head;
+            ch->bs->queue[wp] = msgs[i];
+            ch->bs->q_head = (wp + 1) % XLINK_BATCH_QCAP;
+            ch->bs->q_count++;
+            queued++;
+        }
+
+        /* Check if policy says flush now */
+        if (queued > 0 && batch_decide_flush(ch->bs))
+            batch_flush_internal(ch);
+
+        return queued;
+    }
+
+    /* ── Standard (non-adaptive) path ── */
 
     /* TCP_CORK coalesces multiple writev() calls into fewer TCP segments.
      * Enabled only for SOCK_STREAM fds (TCP), has no effect on other backends. */
@@ -480,6 +637,31 @@ int xlink_recv_batch(xlink_channel_t* ch,
     return recvd;
 }
 
+int xlink_set_batch_policy(xlink_channel_t *ch,
+                           const xlink_batch_policy_t *policy) {
+    if (!ch || !policy) return -1;
+    if (policy->max_batch <= 0 || policy->max_batch > XLINK_BATCH_QCAP)
+        return -1;
+
+    /* Lazy-allocate batch state */
+    if (!ch->bs) {
+        ch->bs = calloc(1, sizeof(*ch->bs));
+        if (!ch->bs) return -1;
+        clock_gettime(CLOCK_MONOTONIC, &ch->bs->first_queued);
+        ch->bs->current_batch = policy->max_batch / 2;
+        if (ch->bs->current_batch < policy->min_batch)
+            ch->bs->current_batch = policy->min_batch;
+    }
+
+    ch->bs->policy = *policy;
+    return 0;
+}
+
+int xlink_flush_batch(xlink_channel_t *ch) {
+    if (!ch || !ch->bs) return 0;
+    return batch_flush_internal(ch);
+}
+
 int xlink_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     if (ch->use_framing)
         return frame_recv(ch, buf, len);
@@ -513,6 +695,7 @@ void xlink_close(xlink_channel_t* ch) {
 #ifdef XLINK_HAS_TLS
     xlink_tls_cleanup(ch);
 #endif
+    free(ch->bs);   /* free adaptive batch state if allocated */
     ch->backend->close(ch);
     free(ch);
 }

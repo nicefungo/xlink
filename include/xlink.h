@@ -157,6 +157,29 @@ int xlink_send_batch(xlink_channel_t* ch,
 int xlink_recv_batch(xlink_channel_t* ch,
                      xlink_msg_t* msgs, int count);
 
+/* ─── Adaptive Batching ───────────────────────────────── */
+
+/* Adaptive batching policy.
+ * Controls how xlink_send_batch() coalesces messages to balance
+ * throughput and latency.  Adaptive mode uses EWMA rate detection
+ * to automatically adjust batch size at runtime. */
+typedef struct {
+    int max_batch;        /* hard limit: max messages per batch */
+    int max_delay_us;     /* max wait time before auto-flush (microseconds) */
+    int min_batch;        /* messages below this → wait for more */
+    int enable;           /* 0 = fixed batch (default), 1 = adaptive */
+} xlink_batch_policy_t;
+
+/* Set adaptive batching policy for a channel.
+ * Applies to subsequent xlink_send_batch() calls on this channel.
+ * Returns 0 on success, -1 on error. */
+int xlink_set_batch_policy(xlink_channel_t* ch,
+                           const xlink_batch_policy_t* policy);
+
+/* Explicitly flush any deferred messages in the batch queue.
+ * Returns number of messages flushed, 0 if empty, -1 on error. */
+int xlink_flush_batch(xlink_channel_t* ch);
+
 /* Receive a framed message.
  *   *len  = capacity of buf on entry, actual size on return.
  * Returns 0 on success, -1 on error / timeout.
