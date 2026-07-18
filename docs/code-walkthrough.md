@@ -978,4 +978,46 @@ GCC in -O0 but flagged as `used but never defined` with `-O2 -Wall`.
 
 ---
 
-*End of code walkthrough. ~2,500 lines of reference source, ~500 lines of documentation.*
+## §20 Lock-Free SPSC Queue (`src/spsc_queue.h`, `src/spsc_queue.c`)
+
+### 20.1 Purpose
+
+A cache-line-padded, lock-free single-producer single-consumer ring buffer using C11 atomic operations with acquire/release semantics. Designed as a building block for multi-core performance optimization (Phase 3.2).
+
+### 20.2 Data Structure
+
+```c
+typedef struct xlink_spsc_queue {
+    void **buffer;           /* ring buffer of void* slots */
+    size_t mask;             /* capacity - 1 (capacity is power of 2) */
+    size_t capacity;
+    _Atomic size_t head;     /* next write index (producer-owned) */
+    _Atomic size_t tail;     /* next read index (consumer-owned) */
+    char _pad[64];           /* cache-line padding */
+} xlink_spsc_queue_t;
+```
+
+### 20.3 Memory Ordering
+
+- **Producer (enqueue):** writes buffer[] with relaxed ordering, then `atomic_store(head, release)` — ensures buffer write is visible before head advances
+- **Consumer (dequeue):** `atomic_load(head, acquire)` — ensures buffer read sees the value written before head was updated
+- Only 2 atomic operations per enqueue/dequeue (vs pthread_mutex's syscall + futex overhead)
+
+### 20.4 Key Functions
+
+| Function | Description |
+|----------|-------------|
+| `xlink_spsc_init(q, cap)` | Allocates ring buffer, rounds cap to power of 2 (min 8) |
+| `xlink_spsc_enqueue(q, item)` | Pushes void*; returns -1 if full |
+| `xlink_spsc_dequeue(q, &out)` | Pops void*; returns -1 if empty |
+| `xlink_spsc_count(q)` | Approximate snapshot of queue depth |
+| `xlink_spsc_full(q)` / `_empty(q)` | Convenience predicates |
+| `xlink_spsc_destroy(q)` | Frees buffer (caller drains first) |
+
+### 20.5 Test Coverage
+
+`tests/test_spsc.c` — 6 tests covering basic ops, full/empty boundary, ring wrap-around, minimum capacity, and 1M-item multi-threaded producer/consumer (both 1K and 64K capacity).
+
+---
+
+*End of code walkthrough. ~2,600 lines of reference source, ~540 lines of documentation.*

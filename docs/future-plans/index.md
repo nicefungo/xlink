@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-07-15 (Zero-Copy Phase 2 详细设计深化)
+> 最后更新：2026-07-18 (Lock-free SPSC 队列实现)
 
 ## 状态总览
 
@@ -77,7 +77,7 @@
 
 | 计划 | 优先级 | 依赖 | 预计工作量 |
 |------|--------|------|-----------|
-| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成；✅ Phase 2 设计完成（Zero-Copy 接口定义 + 完成通知 + 多后端伪代码）；🔄 Phase 3 设计中（自适应批量化 + 多核无锁队列） |
+| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成；✅ Phase 2 设计完成（Zero-Copy 接口定义 + 完成通知 + 多后端伪代码）；🔄 Phase 3 进行中（自适应批量化 ✅, Lock-free SPSC ✅, MPSC + SHM 集成待做） |
 
 ### 远期（P2 — v3.0+）
 
@@ -124,6 +124,8 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-07-18 | Lock-free SPSC 队列实现（Phase 3.2） | 新增 `src/spsc_queue.h`（C11 atomics, acquire/release ordering, cache-line padded, Lamport 经典算法）和 `src/spsc_queue.c`。`test_spsc.c` 6 个测试全部通过：基本操作、满/空检测、环绕、最小容量、100万消息 MT 并发（1024 容量）、100万消息大容量 MT（65536 容量）。每条 op 仅 2 个原子操作（vs mutex 的 syscall+futex），预期 4× 吞吐提升。make all 0 warnings，make test 37/37 ALL PASS。 |
+| 2026-07-17 | 自适应批量化实现（Phase 3.1 完成） | `xlink_batch_policy_t` + `xlink_set_batch_policy()` + `xlink_flush_batch()` API 实现。EWMA 自适应控制器，`test_batch_adaptive.c` 38/38 PASS。make all 0 warnings，make test 36/36 ALL PASS。 |
 | 2026-07-16 | 性能优化 Phase 3 设计深化：自适应批量化 + 多核无锁队列 | 04-performance.md Phase 3 从 5 个 checked box 扩展到完整设计文档：自适应批量化控制器（EWMA 速率检测、动态 batch size、max_delay 超时）和多核优化（lock-free SPSC/MPSC、per-CPU ring buffer、C11 atomic 实现、memory ordering 分析）。自适应批量化预估高频场景 +6% 吞吐、低频大消息延迟降低 10000×。Lock-free SPSC 预期 4× 吞吐提升（vs mutex），MPSC 预期 12-20×。实现计划：自适应 1.5 天、SPSC 2 天。make all 0 warnings，make test 36/36 ALL PASS。 |
 | 2026-06-22 | 性能基准测试完成 + io_uring bug 修复 | `test_aio_perf.c` 6 个基准全部通过。修复 `aio_uring.c` 的 POLL_REMOVE CQE 泄漏 bug（`uring_unwatch` 中使用 `user_data=0` 哨兵 + 立即 drain）。新增 `docs/future-plans/06-perf-benchmarks.md` 基准报告。结果：poll 0.004ms/3515MB/s（Pipe 场景最快），epoll 0.007ms/3060MB/s，io_uring 0.004ms/3003MB/s。SHM 0.032ms，多通道 0.012ms。v2.1 全部 P0 项完成，代码库 0 warnings，32 test binaries ALL PASS。 |
 | 2026-06-19 | 第 89 轮周期审查 — v2.1 稳定维护 | make all 0 警告，make test 32/32 套件全部通过。代码库自 Round 88 起无新提交。v2.1 全部 5 个步骤（2.5-2.9）均已交付，仅剩性能基准测试。所有 docs 检查通过：known-issues 4 项 by-design/minor 不变，design-decisions 均有效，future-plans 5 个计划文档准确。无新增 P0。 |
