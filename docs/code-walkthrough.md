@@ -1020,4 +1020,49 @@ typedef struct xlink_spsc_queue {
 
 ---
 
+## §21 Lock-Free MPSC Queue (`src/mpsc_queue.h`, `src/mpsc_queue.c`)
+
+### 21.1 Purpose
+
+A lock-free multi-producer single-consumer queue built on top of the SPSC queue. Each producer gets its own dedicated SPSC slot — zero contention between producers. The consumer round-robins through all slots.
+
+### 21.2 Architecture
+
+```
+Producer 0 → SPSC[0] ─┐
+Producer 1 → SPSC[1] ─┼── Consumer (round-robin)
+Producer 2 → SPSC[2] ─┤
+Producer 3 → SPSC[3] ─┘
+```
+
+Key design decisions:
+- **Per-producer isolation**: producers never block each other (no shared CAS/futex)
+- **Reuses SPSC**: no new lock-free primitives, same C11 atomic guarantees
+- **Round-robin fairness**: consumer advances slot cursor on each successful dequeue
+- **Slot-independence**: one full producer doesn't block other producers
+
+### 21.3 Key Functions
+
+| Function | Description |
+|----------|-------------|
+| `xlink_mpsc_init(q, n, cap)` | Allocates n SPSC slots, each with capacity `cap` |
+| `xlink_mpsc_enqueue(q, pid, item)` | Producer `pid` pushes to its dedicated SPSC slot |
+| `xlink_mpsc_dequeue(q, &out)` | Consumer round-robins all slots; returns -1 if all empty |
+| `xlink_mpsc_count(q)` | Sums item counts across all slots (approximate) |
+| `xlink_mpsc_empty(q)` | Returns 1 if all slots are empty |
+| `xlink_mpsc_destroy(q)` | Frees all SPSC slots (caller drains first) |
+
+### 21.4 Performance
+
+Per the design in `04-performance.md` §3.2:
+- 1 producer: ~same as SPSC (~0.008ms / op)
+- 4 producers: ~0.012ms (12× vs mutex at ~0.14ms)
+- 8 producers: ~0.015ms (20× vs mutex at ~0.30ms)
+
+### 21.5 Test Coverage
+
+`tests/test_mpsc.c` — 48 checks covering: single-producer degeneracy, two interleaved producers, full-slot isolation (one full slot doesn't block others), 4 producers × 50K messages MT concurrent (200K total, verified zero-loss/zero-duplicate), round-robin ordering, and error paths (invalid pid, zero producers, empty dequeue, double destroy).
+
+---
+
 *End of code walkthrough. ~2,600 lines of reference source, ~540 lines of documentation.*

@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-07-18 (Lock-free SPSC 队列实现)
+> 最后更新：2026-07-19 (Lock-free MPSC 队列实现)
 
 ## 状态总览
 
@@ -77,7 +77,7 @@
 
 | 计划 | 优先级 | 依赖 | 预计工作量 |
 |------|--------|------|-----------|
-| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成；✅ Phase 2 设计完成（Zero-Copy 接口定义 + 完成通知 + 多后端伪代码）；🔄 Phase 3 进行中（自适应批量化 ✅, Lock-free SPSC ✅, MPSC + SHM 集成待做） |
+| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成；✅ Phase 2 设计完成（Zero-Copy 接口定义 + 完成通知 + 多后端伪代码）；🔄 Phase 3 进行中（自适应批量化 ✅, Lock-free SPSC ✅, Lock-free MPSC ✅, SHM 集成待做） |
 
 ### 远期（P2 — v3.0+）
 
@@ -124,6 +124,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-07-19 | Lock-free MPSC 队列实现（Phase 3.2 继续） | 新增 `src/mpsc_queue.h`（per-producer SPSC slot 架构，consumer round-robin）和 `src/mpsc_queue.c`。复用已有 SPSC 底层，每个生产者分配独立 SPSC 队列（零生产者间竞争），消费者 round-robin 轮询所有 slot。`test_mpsc.c` 48 个测试全部通过：单生产者退化、双生产者交错、满 slot 隔离、4 生产者 × 50000 消息 MT 并发（无丢/无重复）、round-robin 公平性、错误路径。make all 0 warnings，39 test suites ALL PASS。下一步：SHM 后端集成 lock-free 队列。 |
 | 2026-07-18 | Lock-free SPSC 队列实现（Phase 3.2） | 新增 `src/spsc_queue.h`（C11 atomics, acquire/release ordering, cache-line padded, Lamport 经典算法）和 `src/spsc_queue.c`。`test_spsc.c` 6 个测试全部通过：基本操作、满/空检测、环绕、最小容量、100万消息 MT 并发（1024 容量）、100万消息大容量 MT（65536 容量）。每条 op 仅 2 个原子操作（vs mutex 的 syscall+futex），预期 4× 吞吐提升。make all 0 warnings，make test 37/37 ALL PASS。 |
 | 2026-07-17 | 自适应批量化实现（Phase 3.1 完成） | `xlink_batch_policy_t` + `xlink_set_batch_policy()` + `xlink_flush_batch()` API 实现。EWMA 自适应控制器，`test_batch_adaptive.c` 38/38 PASS。make all 0 warnings，make test 36/36 ALL PASS。 |
 | 2026-07-16 | 性能优化 Phase 3 设计深化：自适应批量化 + 多核无锁队列 | 04-performance.md Phase 3 从 5 个 checked box 扩展到完整设计文档：自适应批量化控制器（EWMA 速率检测、动态 batch size、max_delay 超时）和多核优化（lock-free SPSC/MPSC、per-CPU ring buffer、C11 atomic 实现、memory ordering 分析）。自适应批量化预估高频场景 +6% 吞吐、低频大消息延迟降低 10000×。Lock-free SPSC 预期 4× 吞吐提升（vs mutex），MPSC 预期 12-20×。实现计划：自适应 1.5 天、SPSC 2 天。make all 0 warnings，make test 36/36 ALL PASS。 |

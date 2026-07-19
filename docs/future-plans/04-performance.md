@@ -274,7 +274,7 @@ int file_zc_copy(xlink_channel_t *ch1, xlink_channel_t *ch2,
 - [x] 多核场景生产者-消费者优化设计（2026-07-16，详见 §3.2）
 - [x] 自适应批量化实现（2026-07-17，新增 `xlink_batch_policy_t` + `xlink_set_batch_policy()` + `xlink_flush_batch()` API，EWMA 自适应控制器，`test_batch_adaptive.c` 38/38 通过）
 - [x] Lock-free SPSC 队列实现（2026-07-18，新增 `src/spsc_queue.h` + `src/spsc_queue.c`，C11 atomic acquire/release 语义，cache-line padded，`test_spsc.c` 6/6 通过含 100万 MT 并发）
-- [ ] Lock-free MPSC 队列（per-producer slot 多生产者扩展）
+- [x] Lock-free MPSC 队列（2026-07-19，新增 `src/mpsc_queue.h` + `src/mpsc_queue.c`，per-producer SPSC slot 架构，consumer round-robin 轮询，`test_mpsc.c` 48/48 通过含 4 producers × 50000 msgs MT 并发）
 - [ ] SHM 后端集成 lock-free 队列
 - [ ] CPU 缓存友好（消息对齐、cacheline padding）
 - [ ] 性能剖析工具（perf / flamegraph 集成）
