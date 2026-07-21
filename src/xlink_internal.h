@@ -2,6 +2,7 @@
 #define XLINK_INTERNAL_H
 
 #include "xlink.h"
+#include "spsc_queue.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <time.h>
@@ -55,6 +56,7 @@ struct xlink_channel {
     xlink_opt_t            opt;      /* saved open options */
     void                  *tls;      /* TLS state (tls_state_t *) */
     struct xlink_batch_state *bs;    /* adaptive batching state (NULL if disabled) */
+    void                  *lfq;     /* lock-free SPSC send queue (NULL if unused) */
 };
 
 /* ─── Backend declarations (defined in backend .c files) ─ */

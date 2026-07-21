@@ -565,6 +565,25 @@ int xlink_send_batch(xlink_channel_t* ch,
         return queued;
     }
 
+    /* ── Lock-free SPSC path (SHM backend, thread-safe) ── */
+    if (ch->lfq && ch->backend->type == XLINK_SHM) {
+        int queued = 0;
+        for (int i = 0; i < count; i++) {
+            /* Copy message data — caller retains ownership of msgs[] */
+            xlink_msg_t *m = malloc(sizeof(*m) + msgs[i].len);
+            if (!m) break;
+            m->data = (char *)(m + 1);
+            m->len  = msgs[i].len;
+            memcpy((void *)m->data, msgs[i].data, msgs[i].len);
+            if (xlink_spsc_enqueue((xlink_spsc_queue_t *)ch->lfq, m) != 0) {
+                free(m);
+                break;  /* queue full */
+            }
+            queued++;
+        }
+        return queued;
+    }
+
     /* ── Standard (non-adaptive) path ── */
 
     /* TCP_CORK coalesces multiple writev() calls into fewer TCP segments.
@@ -662,6 +681,56 @@ int xlink_flush_batch(xlink_channel_t *ch) {
     return batch_flush_internal(ch);
 }
 
+/* ─── Lock-free SPSC send queue (SHM backend) ─── */
+
+int xlink_lfq_init(xlink_channel_t *ch, size_t capacity) {
+    if (!ch) return -1;
+    if (ch->backend->type != XLINK_SHM) return -1;
+    if (ch->lfq) return 0;  /* already initialized */
+
+    xlink_spsc_queue_t *q = calloc(1, sizeof(*q));
+    if (!q) return -1;
+    if (xlink_spsc_init(q, capacity) != 0) {
+        free(q);
+        return -1;
+    }
+    ch->lfq = q;
+    return 0;
+}
+
+int xlink_lfq_flush(xlink_channel_t *ch) {
+    if (!ch || !ch->lfq) return 0;
+
+    xlink_spsc_queue_t *q = (xlink_spsc_queue_t *)ch->lfq;
+    void *item;
+
+    /* Dequeue exactly one message and send it.  SHM backend uses
+     * shm_writen() which blocks until the consumer reads the previous
+     * message — so we must NOT loop here.  Callers should call
+     * lfq_flush() repeatedly until it returns 0 or -1. */
+    if (xlink_spsc_dequeue(q, &item) != 0)
+        return 0;
+
+    xlink_msg_t *m = (xlink_msg_t *)item;
+    int rc;
+    if (ch->use_framing)
+        rc = frame_send(ch, m->data, m->len);
+    else
+        rc = ch->backend->send(ch, m->data, m->len);
+    free(m);
+    if (rc != 0) {
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "lfq_flush send failed");
+        return -1;
+    }
+    return 1;
+}
+
+size_t xlink_lfq_count(xlink_channel_t *ch) {
+    if (!ch || !ch->lfq) return 0;
+    return xlink_spsc_count((xlink_spsc_queue_t *)ch->lfq);
+}
+
 int xlink_recv(xlink_channel_t* ch, void* buf, size_t* len) {
     if (ch->use_framing)
         return frame_recv(ch, buf, len);
@@ -695,6 +764,15 @@ void xlink_close(xlink_channel_t* ch) {
 #ifdef XLINK_HAS_TLS
     xlink_tls_cleanup(ch);
 #endif
+    if (ch->lfq) {
+        /* Drain remaining messages to avoid leaks */
+        xlink_spsc_queue_t *q = (xlink_spsc_queue_t *)ch->lfq;
+        void *item;
+        while (xlink_spsc_dequeue(q, &item) == 0)
+            free(item);
+        xlink_spsc_destroy(q);
+        free(q);
+    }
     free(ch->bs);   /* free adaptive batch state if allocated */
     ch->backend->close(ch);
     free(ch);

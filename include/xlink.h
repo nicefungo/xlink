@@ -180,6 +180,24 @@ int xlink_set_batch_policy(xlink_channel_t* ch,
  * Returns number of messages flushed, 0 if empty, -1 on error. */
 int xlink_flush_batch(xlink_channel_t* ch);
 
+/* ─── Lock-Free SHM Send Queue ──────────────────────────── */
+
+/* Enable a lock-free SPSC send queue on an SHM channel.
+ * Once enabled, xlink_send_batch() enqueues messages into the queue
+ * without locks.  Use xlink_lfq_flush() to drain and send.
+ *
+ * capacity: ring buffer capacity (rounded up to power of 2, min 32).
+ * Returns 0 on success, -1 if channel is not SHM or memory fails. */
+int xlink_lfq_init(xlink_channel_t* ch, size_t capacity);
+
+/* Drain the lock-free send queue: dequeue all messages and send
+ * them via shm_writen().  Returns number of messages sent, 0 if
+ * queue was empty, -1 on error. */
+int xlink_lfq_flush(xlink_channel_t* ch);
+
+/* Return number of queued messages in the lock-free send queue. */
+size_t xlink_lfq_count(xlink_channel_t* ch);
+
 /* Receive a framed message.
  *   *len  = capacity of buf on entry, actual size on return.
  * Returns 0 on success, -1 on error / timeout.
