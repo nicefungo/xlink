@@ -40,6 +40,7 @@ typedef enum {
     XLINK_NONBLOCK = 1 << 2,   /* Non-blocking I/O                       */
     XLINK_BROADCAST = 1 << 3,  /* Multiple consumers (SHM)              */
     XLINK_TLS      = 1 << 4,   /* Enable TLS (TCP only)                  */
+    XLINK_SPSC     = 1 << 5,   /* Lock-free SPSC queue (SHM, bypass shm_ipc lock) */
 } xlink_flag_t;
 
 /* ─── TLS Configuration ───────────────────────────────── */

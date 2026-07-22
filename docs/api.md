@@ -199,7 +199,7 @@ void        xlink_dump(xlink_channel_t* ch, int fd);
 
 ```c
 typedef struct {
-    uint32_t flags;       /* XLINK_CREATE | XLINK_SERVER | XLINK_NONBLOCK | XLINK_BROADCAST */
+    uint32_t flags;       /* XLINK_CREATE | XLINK_SERVER | XLINK_NONBLOCK | XLINK_BROADCAST | XLINK_SPSC */
     size_t   buf_size;    /* 缓冲区大小 */
     int      timeout_ms;  /* 接收超时，-1=阻塞 */
     union {
@@ -226,6 +226,7 @@ typedef struct {
 | `XLINK_SERVER` | TCP：创建服务端监听 |
 | `XLINK_NONBLOCK` | 非阻塞模式。`xlink_recv()` 在无数据时立即返回 -1 |
 | `XLINK_BROADCAST` | SHM：创建广播段（多个消费者） |
+| `XLINK_SPSC` | SHM：启用锁自由 SPSC 队列（旁路 shm_ipc 互斥锁），提升单生产者吞吐量 |
 
 **NONBLOCK 行为因传输类型而异：**
 

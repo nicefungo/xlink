@@ -855,6 +855,23 @@ dependencies (no `liburing`).
 | xlink_run() | `src/aio.c` | `xlink_run()` | `test_run.c` (24 checks) |
 | io_uring | `src/aio_uring.c` | `xlink_aio_create(3)` | `test_aio.c` (compat) |
 
+### 18.5 Lock-Free SPSC SHM Channel (`src/shm_backend.c`, 2026-07-22)
+
+The SHM backend now supports a lock-free SPSC data path via `XLINK_SPSC` flag.
+When enabled, the backend creates a separate shared memory region
+(`/xlink-spsc-<name>`) containing a byte-level ring buffer with atomic
+head/tail cursors (C11 `memory_order_acquire/release`).  This bypasses
+`shm_ipc`'s internal `pthread_mutex_lock`, eliminating lock contention in
+single-producer scenarios.
+
+**Key design points:**
+- Data ring format: `[uint32_t len][data bytes]`, with proper wrap handling
+- Auto-detection: non-CREATE opens probe for the SPSC region and use it if present
+- FIFO notification still used for eventfd/epoll wake-up
+- Fallback: if `XLINK_SPSC` not set, classic `shm_ipc` path is used unchanged
+- `test_shm_spsc_channel.c`: 5 tests (basic send/recv, multi-message, auto-detect,
+  fork cross-process, ring boundary wrap), all pass
+
 ---
 
 ## 19. TLS v2: Non-Blocking Handshake (`src/tls.c`, 2026-07-10)
