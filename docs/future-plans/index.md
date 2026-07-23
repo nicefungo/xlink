@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-07-22 (SHM SPSC lock-free 队列集成)
+> 最后更新：2026-07-23 (性能剖析 make profile + 缓存行对齐文档)
 
 ## 状态总览
 
@@ -124,6 +124,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-07-23 | 性能剖析工具 + 缓存行对齐文档补充 | 新增 `make profile` Makefile 目标（`-fno-omit-frame-pointer -ggdb -O2`），支持 `perf record -g` 调用栈回溯。04-performance.md 补充 §4 性能剖析章节：构建与采集、典型分析场景表、缓存行对齐详解（SPSC padding / SHM SPSC header / MPSC slot隔离）、已知分析机会清单。code-walkthrough.md 新增 §22 剖析支持。Phase 3 性能优化剩余 2 项（缓存友好 + 剖析工具）标记为完成。make all 0 warnings，make test 43 test suites ALL PASS。 |
 | 2026-07-22 | SHM SPSC lock-free 队列集成（Phase 3 收尾） | shm_backend.c 新增锁自由 SPSC 共享内存路径（`XLINK_SPSC` flag）。Producer 通过 `shm_open+mmap` 的共享内存数据环写入消息（[len:4B][data] 格式，atomic acquire/release 同步），旁路 shm_ipc 的 pthread_mutex_lock。Consumer 侧无需 flag 即可自动探测 SPSC 区域。新增 `test_shm_spsc_channel.c` 5 个测试：基本收发、多消息混合大小、非 CREATE 自动探测、fork 跨进程、ring 边界环绕。43 test binaries ALL PASS，0 新增警告。仅剩性能剖析工具和分析（perf/flamegraph）作为远期任务。 |
 | 2026-07-19 | Lock-free MPSC 队列实现（Phase 3.2 继续） | 新增 `src/mpsc_queue.h`（per-producer SPSC slot 架构，consumer round-robin）和 `src/mpsc_queue.c`。复用已有 SPSC 底层，每个生产者分配独立 SPSC 队列（零生产者间竞争），消费者 round-robin 轮询所有 slot。`test_mpsc.c` 48 个测试全部通过：单生产者退化、双生产者交错、满 slot 隔离、4 生产者 × 50000 消息 MT 并发（无丢/无重复）、round-robin 公平性、错误路径。make all 0 warnings，39 test suites ALL PASS。 |
 | 2026-07-18 | Lock-free SPSC 队列实现（Phase 3.2） | 新增 `src/spsc_queue.h`（C11 atomics, acquire/release ordering, cache-line padded, Lamport 经典算法）和 `src/spsc_queue.c`。`test_spsc.c` 6 个测试全部通过：基本操作、满/空检测、环绕、最小容量、100万消息 MT 并发（1024 容量）、100万消息大容量 MT（65536 容量）。每条 op 仅 2 个原子操作（vs mutex 的 syscall+futex），预期 4× 吞吐提升。make all 0 warnings，make test 37/37 ALL PASS。 |

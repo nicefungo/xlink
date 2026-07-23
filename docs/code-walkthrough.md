@@ -1080,6 +1080,37 @@ Per the design in `04-performance.md` §3.2:
 
 `tests/test_mpsc.c` — 48 checks covering: single-producer degeneracy, two interleaved producers, full-slot isolation (one full slot doesn't block others), 4 producers × 50K messages MT concurrent (200K total, verified zero-loss/zero-duplicate), round-robin ordering, and error paths (invalid pid, zero producers, empty dequeue, double destroy).
 
+## §22 Profiling Support (`make profile`)
+
+### 22.1 Purpose
+
+Added 2026-07-23. Provides a profiling-optimized build target (`make profile`) for
+performance analysis with `perf` and flamegraph tools. Distinct from the default
+`make all` build which may omit frame pointers during optimization.
+
+### 22.2 Build Flags
+
+| Flag | Purpose |
+|------|---------|
+| `-fno-omit-frame-pointer` | Preserve frame pointers for `perf record -g` call-stack unwinding |
+| `-ggdb` | Enhanced debug symbols for `perf annotate` source-level display |
+| `-O2` | Keep optimization level (avoids distorting performance characteristics) |
+
+The profile build produces identical code paths to the release build; the only
+difference is frame pointer retention (~1-3% overhead from extra stack instructions).
+
+### 22.3 Usage
+
+```bash
+make profile                                    # rebuild all with profiling flags
+perf record -g ./bin/tests/test_spsc            # collect call-graph profile
+perf report                                      # interactive hotspot report
+perf stat -e cache-misses ./bin/tests/test_spsc  # hardware counter stats
+```
+
+See `docs/future-plans/04-performance.md` §4 for full flamegraph generation workflow,
+hardware counter recipes, and cache-line alignment documentation.
+
 ---
 
 *End of code walkthrough. ~2,600 lines of reference source, ~540 lines of documentation.*

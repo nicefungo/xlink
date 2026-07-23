@@ -81,6 +81,37 @@ perf: lib
 	$(CC) $(CFLAGS) $(INCS) -o bin/tests/test_batch_perf tests/test_batch_perf.c $(LIB) $(LDLIBS)
 	./bin/tests/test_batch_perf
 
+# ─── Profiling build (perf / flamegraph) ─────────────────
+# Build with debug symbols and frame pointers for perf record.
+# Usage:
+#   make profile          → rebuild all with profiling flags
+#   perf record -g ./bin/tests/test_spsc
+#   perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
+PROFILE_FLAGS = -g -O2 -fno-omit-frame-pointer -ggdb
+
+profile: clean
+	@mkdir -p bin bin/tests
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/xlink.o -c src/xlink.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/spsc_queue.o -c src/spsc_queue.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/mpsc_queue.o -c src/mpsc_queue.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/plugin.o -c src/plugin.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/aio.o -c src/aio.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/aio_epoll.o -c src/aio_epoll.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/aio_poll.o -c src/aio_poll.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/aio_uring.o -c src/aio_uring.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/shm_backend.o -c src/shm_backend.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/pipe_backend.o -c src/pipe_backend.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/tcp_backend.o -c src/tcp_backend.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/udp_backend.o -c src/udp_backend.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/serial_backend.o -c src/serial_backend.c
+	$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/file_backend.o -c src/file_backend.c
+	$(AR) rcs $(LIB) $(OBJS)
+	@for src in $(TEST_SRCS); do \
+		name=$$(basename $$src .c); \
+		$(CC) $(PROFILE_FLAGS) $(CFLAGS:-O2=) $(INCS) -o bin/tests/$$name $$src $(LIB) $(LDLIBS); \
+	done
+	@echo "=== Profile build complete (use perf record -g ./bin/tests/<test>) ==="
+
 clean:
 	rm -rf bin
 

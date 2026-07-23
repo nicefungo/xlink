@@ -276,8 +276,8 @@ int file_zc_copy(xlink_channel_t *ch1, xlink_channel_t *ch2,
 - [x] Lock-free SPSC 队列实现（2026-07-18，新增 `src/spsc_queue.h` + `src/spsc_queue.c`，C11 atomic acquire/release 语义，cache-line padded，`test_spsc.c` 6/6 通过含 100万 MT 并发）
 - [x] Lock-free MPSC 队列（2026-07-19，新增 `src/mpsc_queue.h` + `src/mpsc_queue.c`，per-producer SPSC slot 架构，consumer round-robin 轮询，`test_mpsc.c` 48/48 通过含 4 producers × 50000 msgs MT 并发）
 - [x] SHM 后端集成 lock-free 队列（2026-07-22，新增 `XLINK_SPSC` flag，`shm_backend.c` 支持共享内存 SPSC 数据环，旁路 shm_ipc mutex，跨进程 fork 测试全通过）
-- [ ] CPU 缓存友好（消息对齐、cacheline padding）
-- [ ] 性能剖析工具（perf / flamegraph 集成）
+- [x] CPU 缓存友好（消息对齐、cacheline padding）— SPSC queue 已有 `XLINK_CACHE_LINE` (64B) padding + `_pad` 字段防 false sharing；MPSC 复用 SPSC slots，各 slot 独立 cache-line 对齐
+- [x] 性能剖析工具（perf / flamegraph 集成）— `make profile` 目标已添加，附带 `-fno-omit-frame-pointer -ggdb` 标志，文档见 §4
 
 #### 3.1 自适应批量化设计
 
@@ -499,6 +499,77 @@ typedef struct xlink_mpsc_queue {
    → **决策 (2026-07-15)**: 统一 API 签名（`xlink_send_zc(ch, buf, done, userdata)`），后端差异在内部处理。用户通过 `xlink_zc_capable()` 查询能力，不需要知道后端细节。
 4. **批量化与延迟的 trade-off**: 批量化提高吞吐但增加延迟。是否需要用户可控的 flush 策略？
    → 仍然开放。备选方案：`xlink_flush(ch)` 显式 flush，或 `XLINK_BATCH_TIMEOUT` 配置最大等待时间。
+
+### 4. 性能剖析（perf / flamegraph）
+
+> **实现**: 2026-07-23 — `make profile` 目标
+
+#### 4.1 构建与采集
+
+```bash
+# 构建可剖析二进制（含 frame pointers + 调试符号）
+make profile
+
+# 采集性能数据（以 test_spsc 为例）
+perf record -g ./bin/tests/test_spsc
+
+# 查看热点
+perf report
+
+# 生成火焰图（需要 Brendan Gregg 的 FlameGraph 工具）
+perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
+```
+
+#### 4.2 Makefile 实现
+
+`make profile` 使用以下标志重新编译所有目标文件：
+- `-fno-omit-frame-pointer` — 保留帧指针，使 `perf record -g` 能够回溯调用栈
+- `-ggdb` — GDB 增强调试符号，让 `perf annotate` 显示源码行级信息
+- `-O2` 保持不变 — 避免 `-O0` 导致性能特征失真
+
+与默认 `make all` 的区别：
+- 默认构建使用 `-O2 -g`（基础调试符号，帧指针可能被优化）
+- Profile 构建显式添加 `-fno-omit-frame-pointer -ggdb`
+- 两者产生**性能相同的二进制**（仅帧指针微小开销），但 profile 构建支持完整调用栈回溯
+
+#### 4.3 典型分析场景
+
+| 场景 | 命令 | 查看指标 |
+|------|------|---------|
+| CPU 热点 | `perf record -g ./bin/tests/test_spsc` | `perf report` 查看 % of CPU |
+| 缓存未命中 | `perf stat -e cache-misses ./bin/tests/test_spsc` | cache-miss rate |
+| 分支预测失败 | `perf stat -e branch-misses ./bin/tests/test_spsc` | branch-miss % |
+| 上下文切换 | `perf stat -e context-switches ./bin/tests/test_mpsc` | voluntary/involuntary switches |
+| 锁竞争 | `perf lock record ./bin/tests/test_spsc` | `perf lock report` 锁持有时间 |
+| 火焰图 | `perf script \| stackcollapse-perf.pl \| flamegraph.pl > flame.svg` | 可视化调用栈 |
+
+#### 4.4 缓存行对齐（Cache-line Padding）
+
+**SPSC 队列** (已实现, 2026-07-18)：
+- `xlink_spsc_queue_t` 结构体包含 `_pad[XLINK_CACHE_LINE - ...]` 字段
+- `XLINK_CACHE_LINE = 64`（x86-64 典型 cache line 大小）
+- 生产者（head）和消费者（tail）在不同 cache line 上，防止 false sharing
+- 验证：`sizeof(xlink_spsc_queue_t) == 128`（2 条 cache line）
+
+**SHM SPSC 头** (已实现, 2026-07-22)：
+- `shm_spsc_hdr_t` 有 `char _pad[32]` 填充
+- `SPSC_HDR_OFFSET = 64`（1 条 cache line），数据环从第二条 cache line 开始
+- `head`/`tail` 在第一条 cache line（64B），数据在后续 cache line
+
+**MPSC 队列** (已实现, 2026-07-19)：
+- `xlink_mpsc_queue_t` 使用 `xlink_spsc_queue_t **slots` 指针数组
+- 每个 slot 是独立的堆分配 `xlink_spsc_queue_t`，自带 cache-line padding
+- 不同生产者的 slot 不会共享 cache line（`calloc` 后独立分配）
+- Consumer 的 `rd_idx` 在 MPSC struct 内，与 slots 数组分离
+
+#### 4.5 已知分析机会
+
+| 热点区域 | 预期瓶颈 | 推荐工具 |
+|---------|---------|---------|
+| `spsc_enqueue` 原子操作 | `lock cmpxchg` (RMW) overhead | `perf annotate spsc_enqueue` |
+| `shm_writen` mutex 路径 | `pthread_mutex_lock` futex | `perf lock record` |
+| `xlink_wait_aio` epoll | `epoll_wait` syscall | `perf trace -e epoll_wait` |
+| `frame_send` writev | copy_from_user (kernel) | `perf record -e syscalls:sys_enter_writev` |
 
 ## 关联文档
 
