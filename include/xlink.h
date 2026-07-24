@@ -301,6 +301,59 @@ int xlink_tls_handshake_continue(xlink_channel_t *ch);
 
 #endif /* XLINK_HAS_TLS */
 
+/* ─── Zero-Copy Transfer ─────────────────────────────── */
+
+/* Zero-copy buffer descriptor.
+ *
+ * Can reference data in arbitrary memory (SHM, mmap'd file, stack).
+ * Use xlink_zc_poll() or a done callback to know when the buffer
+ * can be safely reused or freed after xlink_send_zc(). */
+typedef struct xlink_zc_buf {
+    void     *addr;       /* data start address */
+    size_t    len;        /* data length in bytes */
+    int       fd;         /* optional backing fd (memfd, shm, regular file) */
+    uint64_t  tag;        /* user tag for completion matching */
+} xlink_zc_buf_t;
+
+/* Zero-copy completion callback.
+ * Called when the kernel/buffer is finished with the buffer.
+ *   status: 0 = success, <0 = error (errno code).
+ *   tag:    matches the tag in xlink_zc_buf_t. */
+typedef void (*xlink_zc_done_fn)(xlink_channel_t *ch,
+                                  uint64_t tag,
+                                  int status,
+                                  void *userdata);
+
+/* Send data with zero-copy (where supported).
+ *
+ * After calling, do not touch buf->addr until the done callback
+ * fires or xlink_zc_poll() reports completion. Ownership of the
+ * buffer transfers to xlink until completion.
+ *
+ * Returns 0 on success, -1 on error (check xlink_errstr).
+ * Not all backends support zero-copy; check with xlink_zc_capable(). */
+int xlink_send_zc(xlink_channel_t *ch,
+                  const xlink_zc_buf_t *buf,
+                  xlink_zc_done_fn done,
+                  void *userdata);
+
+/* Receive zero-copy data (returns a pointer into shared/internal memory).
+ * The pointer is valid until xlink_recv_zc_done() is called.
+ *
+ * Returns 0 on success (*data and *len set), -1 on error. */
+int xlink_recv_zc(xlink_channel_t *ch, void **data, size_t *len);
+
+/* Release a buffer obtained via xlink_recv_zc(). */
+void xlink_recv_zc_done(xlink_channel_t *ch, void *data);
+
+/* Poll for zero-copy completions (alternative to callbacks).
+ * Returns number of completed sends since last call, 0 if none, -1 on error. */
+int xlink_zc_poll(xlink_channel_t *ch);
+
+/* Check if a channel supports zero-copy operations.
+ * Returns 1 if supported, 0 if not, -1 on error. */
+int xlink_zc_capable(xlink_channel_t *ch);
+
 /* ─── Error Reporting ─────────────────────────────────── */
 
 /* Return human-readable string for last error on this channel. */

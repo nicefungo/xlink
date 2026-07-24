@@ -258,7 +258,7 @@ int file_zc_copy(xlink_channel_t *ch1, xlink_channel_t *ch2,
 
 #### 2.7 实现步骤
 
-- [ ] **Step 2.1**: `xlink_zc_buf_t` + `xlink_zc_done_fn` 类型定义（`include/xlink.h`）
+- [x] **Step 2.1**: `xlink_zc_buf_t` + `xlink_zc_done_fn` 类型定义（`include/xlink.h`） ✅ 2026-07-24
 - [ ] **Step 2.2**: SHM zero-copy（`src/shm_backend.c`）：`shm_send_zc` + `xlink_recv_zc` + `xlink_recv_zc_done`
 - [ ] **Step 2.3**: SHM 完成通知（eventfd / FIFO 集成）
 - [ ] **Step 2.4**: TCP MSG_ZEROCOPY（`src/tcp_backend.c`）：`tcp_send_zc` + epoll 错误队列监控

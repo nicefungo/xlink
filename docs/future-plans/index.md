@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-07-23 (性能剖析 make profile + 缓存行对齐文档)
+> 最后更新：2026-07-24 (Zero-Copy Phase 2.1: 公共 API 类型定义)
 
 ## 状态总览
 
@@ -77,7 +77,7 @@
 
 | 计划 | 优先级 | 依赖 | 预计工作量 |
 |------|--------|------|-----------|
-| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成；✅ Phase 2 设计完成（Zero-Copy 接口定义 + 完成通知 + 多后端伪代码）；✅ Phase 3 基本完成（自适应批量化 ✅, Lock-free SPSC ✅, Lock-free MPSC ✅, SHM SPSC 集成 ✅） |
+| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成；✅ Phase 2 设计完成（Zero-Copy 接口定义 + 完成通知 + 多后端伪代码）；🔄 Phase 2 实现中（Step 2.1 API 类型定义完成）；✅ Phase 3 基本完成（自适应批量化 ✅, Lock-free SPSC ✅, Lock-free MPSC ✅, SHM SPSC 集成 ✅, 缓存友好 ✅, 剖析工具 ✅） |
 
 ### 远期（P2 — v3.0+）
 
@@ -124,6 +124,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-07-24 | Zero-Copy Phase 2.1 启动：公共 API 类型定义 | include/xlink.h 新增 `xlink_zc_buf_t`、`xlink_zc_done_fn`、`xlink_send_zc()`、`xlink_recv_zc()`、`xlink_recv_zc_done()`、`xlink_zc_poll()`、`xlink_zc_capable()` 共 7 个类型/函数声明。采用统一 API 签名（后端差异内部处理），所有权语义通过异步完成回调 + 轮询双路径管理。make all 0 warnings，make test 43 suites ALL PASS。后续步骤：Step 2.2 SHM 后端零拷贝实现、Step 2.3 完成通知机制。 |
 | 2026-07-23 | 性能剖析工具 + 缓存行对齐文档补充 | 新增 `make profile` Makefile 目标（`-fno-omit-frame-pointer -ggdb -O2`），支持 `perf record -g` 调用栈回溯。04-performance.md 补充 §4 性能剖析章节：构建与采集、典型分析场景表、缓存行对齐详解（SPSC padding / SHM SPSC header / MPSC slot隔离）、已知分析机会清单。code-walkthrough.md 新增 §22 剖析支持。Phase 3 性能优化剩余 2 项（缓存友好 + 剖析工具）标记为完成。make all 0 warnings，make test 43 test suites ALL PASS。 |
 | 2026-07-22 | SHM SPSC lock-free 队列集成（Phase 3 收尾） | shm_backend.c 新增锁自由 SPSC 共享内存路径（`XLINK_SPSC` flag）。Producer 通过 `shm_open+mmap` 的共享内存数据环写入消息（[len:4B][data] 格式，atomic acquire/release 同步），旁路 shm_ipc 的 pthread_mutex_lock。Consumer 侧无需 flag 即可自动探测 SPSC 区域。新增 `test_shm_spsc_channel.c` 5 个测试：基本收发、多消息混合大小、非 CREATE 自动探测、fork 跨进程、ring 边界环绕。43 test binaries ALL PASS，0 新增警告。仅剩性能剖析工具和分析（perf/flamegraph）作为远期任务。 |
 | 2026-07-19 | Lock-free MPSC 队列实现（Phase 3.2 继续） | 新增 `src/mpsc_queue.h`（per-producer SPSC slot 架构，consumer round-robin）和 `src/mpsc_queue.c`。复用已有 SPSC 底层，每个生产者分配独立 SPSC 队列（零生产者间竞争），消费者 round-robin 轮询所有 slot。`test_mpsc.c` 48 个测试全部通过：单生产者退化、双生产者交错、满 slot 隔离、4 生产者 × 50000 消息 MT 并发（无丢/无重复）、round-robin 公平性、错误路径。make all 0 warnings，39 test suites ALL PASS。 |
