@@ -819,6 +819,77 @@ size_t xlink_plugin_count(void) {
     return xlink_plugin_count_impl();
 }
 
+/* ─── Zero-Copy ────────────────────────────────────────── */
+
+int xlink_zc_capable(xlink_channel_t *ch) {
+    if (!ch) return -1;
+    if (ch->backend->zc_capable)
+        return ch->backend->zc_capable(ch);
+    return 0;
+}
+
+int xlink_send_zc(xlink_channel_t *ch,
+                  const xlink_zc_buf_t *buf,
+                  xlink_zc_done_fn done,
+                  void *userdata) {
+    if (!ch || !buf || !buf->addr || buf->len == 0) {
+        if (ch) snprintf(ch->errbuf, sizeof(ch->errbuf),
+                         "xlink_send_zc: invalid args");
+        return -1;
+    }
+    if (!ch->backend->send_zc) {
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "xlink_send_zc: backend '%s' does not support zero-copy",
+                 ch->backend->name);
+        return -1;
+    }
+
+    uint64_t tag = buf->tag;
+    if (tag == 0) tag = ++ch->zc.next_tag;
+
+    int rc = ch->backend->send_zc(ch, buf);
+    int status = (rc == 0) ? 0 : -errno;
+
+    /* fire completion callback if user provided one */
+    if (done) done(ch, tag, status, userdata);
+
+    /* enqueue to ring for poll-based completion */
+    int h = ch->zc.head;
+    ch->zc.entries[h].tag    = tag;
+    ch->zc.entries[h].status = status;
+    ch->zc.head = (h + 1) % XLINK_ZC_DONE_CAP;
+
+    return rc;
+}
+
+int xlink_recv_zc(xlink_channel_t *ch, void **data, size_t *len) {
+    if (!ch || !data || !len) return -1;
+    if (!ch->backend->recv_zc) {
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "xlink_recv_zc: backend '%s' does not support zero-copy",
+                 ch->backend->name);
+        return -1;
+    }
+    return ch->backend->recv_zc(ch, data, len);
+}
+
+void xlink_recv_zc_done(xlink_channel_t *ch, void *data) {
+    if (!ch || !data) return;
+    if (ch->backend->recv_zc_done)
+        ch->backend->recv_zc_done(ch, data);
+}
+
+int xlink_zc_poll(xlink_channel_t *ch) {
+    if (!ch) return -1;
+
+    int count = 0;
+    while (ch->zc.tail != ch->zc.head) {
+        ch->zc.tail = (ch->zc.tail + 1) % XLINK_ZC_DONE_CAP;
+        count++;
+    }
+    return count;
+}
+
 void xlink_dump(xlink_channel_t* ch, int fd) {
     if (!ch) {
         const char* msg = "xlink channel @ (null)\n";

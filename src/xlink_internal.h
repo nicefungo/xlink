@@ -18,6 +18,12 @@ typedef struct {
     int  (*write)(xlink_channel_t* ch, const void* data, size_t len);
     int  (*read) (xlink_channel_t* ch, void* buf, size_t len, int timeout_ms);
     int  (*peek) (xlink_channel_t* ch, size_t* avail);
+
+    /* Zero-copy (optional — set to NULL if unsupported) */
+    int  (*send_zc)(xlink_channel_t* ch, const xlink_zc_buf_t *buf);
+    int  (*recv_zc)(xlink_channel_t* ch, void **data, size_t *len);
+    void (*recv_zc_done)(xlink_channel_t* ch, void *data);
+    int  (*zc_capable)(xlink_channel_t* ch);
 } xlink_backend_t;
 
 /* ─── Adaptive batch state (internal) ─────────────────── */
@@ -45,6 +51,22 @@ struct xlink_batch_state {
     struct timespec last_flush;    /* last flush monotonic time */
 };
 
+/* ─── Zero-copy completion tracking ───────────────────── */
+
+#define XLINK_ZC_DONE_CAP  64   /* max in-flight zero-copy sends */
+
+struct xlink_zc_done_entry {
+    uint64_t          tag;
+    int               status;    /* 0 = success, <0 = errno */
+};
+
+struct xlink_zc_state {
+    struct xlink_zc_done_entry entries[XLINK_ZC_DONE_CAP];
+    int                        head;       /* producer (add completions) */
+    int                        tail;       /* consumer (zcpoll drains) */
+    uint64_t                   next_tag;   /* monotonic tag allocator */
+};
+
 /* ─── Channel struct (exposed to backends) ────────────── */
 struct xlink_channel {
     const xlink_backend_t* backend;
@@ -57,6 +79,7 @@ struct xlink_channel {
     void                  *tls;      /* TLS state (tls_state_t *) */
     struct xlink_batch_state *bs;    /* adaptive batching state (NULL if disabled) */
     void                  *lfq;     /* lock-free SPSC send queue (NULL if unused) */
+    struct xlink_zc_state  zc;      /* zero-copy completion ring */
 };
 
 /* ─── Backend declarations (defined in backend .c files) ─ */

@@ -504,6 +504,84 @@ static int shm_backend_peek(xlink_channel_t* ch, size_t* avail) {
     return 0;
 }
 
+/* ── Zero-Copy ──────────────────────────────────────── */
+
+static int shm_zc_capable(xlink_channel_t *ch) {
+    (void)ch;
+    return 1;  /* SHM always supports zero-copy */
+}
+
+static int shm_send_zc(xlink_channel_t *ch, const xlink_zc_buf_t *buf) {
+    /* SHM zero-copy send: identical to regular send — data is
+     * committed to shared memory immediately. For SPSC mode,
+     * this writes directly into the shared ring. */
+    return shm_backend_send(ch, buf->addr, buf->len);
+}
+
+static int shm_recv_zc(xlink_channel_t *ch, void **data, size_t *len) {
+    shm_priv_t *p = (shm_priv_t *)ch->priv;
+
+    if (!p->use_spsc || !p->spsc_hdr) {
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "xlink_recv_zc: SHM channel not in SPSC mode; "
+                 "use xlink_recv() instead");
+        return -1;
+    }
+
+    shm_spsc_hdr_t *h = p->spsc_hdr;
+    size_t tl = atomic_load_explicit(&h->tail, memory_order_relaxed);
+    size_t hd = atomic_load_explicit(&h->head, memory_order_acquire);
+
+    if (tl == hd) {
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "xlink_recv_zc: no data available");
+        return -1;
+    }
+
+    /* Read length prefix at the tail position */
+    uint32_t msg_len;
+    size_t pos = tl & h->mask;
+    size_t cap = h->capacity;
+    size_t avail = cap - pos;
+
+    if (avail >= sizeof(uint32_t)) {
+        memcpy(&msg_len, p->spsc_data + pos, sizeof(uint32_t));
+    } else {
+        memcpy(&msg_len, p->spsc_data + pos, avail);
+        memcpy(((unsigned char *)&msg_len) + avail,
+               p->spsc_data, sizeof(uint32_t) - avail);
+    }
+
+    if (msg_len == 0 || msg_len > SPSC_DATA_CAP) {
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "xlink_recv_zc: corrupted message (len=%u)", msg_len);
+        return -1;
+    }
+
+    /* Return pointer into the SPSC data ring (skip 4B length header).
+     * Caller must call xlink_recv_zc_done() to advance the cursor. */
+    size_t data_pos = (pos + sizeof(uint32_t)) & h->mask;
+    *data = p->spsc_data + data_pos;
+    *len  = msg_len;
+
+    /* store cursor context for recv_zc_done */
+    p->spsc_rd  = tl;
+    p->spsc_wr  = msg_len;
+    return 0;
+}
+
+static void shm_recv_zc_done(xlink_channel_t *ch, void *data) {
+    shm_priv_t *p = (shm_priv_t *)ch->priv;
+    if (!p || !p->use_spsc || !p->spsc_hdr) return;
+    (void)data;
+
+    shm_spsc_hdr_t *h = p->spsc_hdr;
+    size_t total = sizeof(uint32_t) + p->spsc_wr;
+    size_t new_tail = p->spsc_rd + total;
+
+    atomic_store_explicit(&h->tail, new_tail, memory_order_release);
+}
+
 const xlink_backend_t xlink_shm_backend = {
     .type  = XLINK_SHM,
     .name  = "shm",
@@ -514,4 +592,9 @@ const xlink_backend_t xlink_shm_backend = {
     .write = NULL,
     .read  = shm_backend_read,
     .peek  = shm_backend_peek,
+
+    .send_zc      = shm_send_zc,
+    .recv_zc      = shm_recv_zc,
+    .recv_zc_done = shm_recv_zc_done,
+    .zc_capable   = shm_zc_capable,
 };

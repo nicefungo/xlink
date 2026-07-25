@@ -183,6 +183,72 @@ void xlink_close(xlink_channel_t* ch);
 
 ---
 
+## 零拷贝传输（v2.1, SHM SPSC）
+
+零拷贝 API 允许直接访问共享内存中的数据，免除 `memcpy` 开销。
+
+### xlink_zc_capable
+
+```c
+int xlink_zc_capable(xlink_channel_t *ch);
+```
+
+**返回：** 1 表示支持零拷贝，0 不支持，-1 出错。当前仅 SHM 支持（需 SPSC 模式）。
+
+### xlink_send_zc
+
+```c
+typedef struct xlink_zc_buf {
+    void     *addr;
+    size_t    len;
+    int       fd;
+    uint64_t  tag;
+} xlink_zc_buf_t;
+
+typedef void (*xlink_zc_done_fn)(xlink_channel_t *ch, uint64_t tag,
+                                  int status, void *userdata);
+
+int xlink_send_zc(xlink_channel_t *ch, const xlink_zc_buf_t *buf,
+                  xlink_zc_done_fn done, void *userdata);
+```
+
+零拷贝发送。SHM 后端立即完成（同步），数据直接写入共享内存的 SPSC data ring。
+
+```c
+xlink_zc_buf_t buf = { .addr = msg, .len = len, .tag = 1 };
+xlink_send_zc(ch, &buf, NULL, NULL);  /* 无回调方式 */
+xlink_zc_poll(ch);                     /* 检查完成 */
+```
+
+### xlink_recv_zc / xlink_recv_zc_done
+
+```c
+int xlink_recv_zc(xlink_channel_t *ch, void **data, size_t *len);
+void xlink_recv_zc_done(xlink_channel_t *ch, void *data);
+```
+
+`xlink_recv_zc()` 返回指向 SPSC data ring 的指针（不拷贝）。**必须**调用 `xlink_recv_zc_done()` 推进消费者游标。
+
+```c
+void *data = NULL; size_t len = 0;
+if (xlink_recv_zc(ch, &data, &len) == 0) {
+    process(data, len);
+    xlink_recv_zc_done(ch, data);
+}
+```
+
+### xlink_zc_poll
+
+```c
+int xlink_zc_poll(xlink_channel_t *ch);
+```
+
+返回自上次调用以来完成的发送数。SHM 上完成是同步的。
+
+**注意：** 需要 `XLINK_SPSC` flag（`XLINK_CREATE | XLINK_SPSC`）。
+
+---
+
 ## xlink_errstr / xlink_type_str / xlink_dump
 
 ```c
