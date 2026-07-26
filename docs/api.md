@@ -247,6 +247,14 @@ int xlink_zc_poll(xlink_channel_t *ch);
 
 **注意：** 需要 `XLINK_SPSC` flag（`XLINK_CREATE | XLINK_SPSC`）。
 
+### xlink_zc_notify_fd
+
+```c
+int xlink_zc_notify_fd(xlink_channel_t *ch);
+```
+
+返回一个可用 epoll/poll/select 监听的 fd。fd 可读时表示有零拷贝发送完成通知待处理（通过 `xlink_zc_poll()` drain）。eventfd 在首次调用时 lazy-create，使用 `EFD_NONBLOCK | EFD_CLOEXEC`。可集成到 `xlink_wait_aio()` 等事件循环中，避免单独轮询零拷贝完成状态。
+
 ---
 
 ## xlink_errstr / xlink_type_str / xlink_dump

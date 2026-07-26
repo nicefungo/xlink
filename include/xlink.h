@@ -354,6 +354,11 @@ int xlink_zc_poll(xlink_channel_t *ch);
  * Returns 1 if supported, 0 if not, -1 on error. */
 int xlink_zc_capable(xlink_channel_t *ch);
 
+/* Get an fd suitable for epoll/poll/select to wait for zero-copy
+ * send completions. Created lazily on first call. Returns -1 on error.
+ * Readable = at least one completion available via xlink_zc_poll(). */
+int xlink_zc_notify_fd(xlink_channel_t *ch);
+
 /* ─── Error Reporting ─────────────────────────────────── */
 
 /* Return human-readable string for last error on this channel. */

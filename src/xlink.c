@@ -3,6 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/eventfd.h>
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/socket.h>
@@ -386,6 +387,7 @@ xlink_channel_t* xlink_open(xlink_type_t type, const char* addr,
     ch->flags   = opt ? (int)opt->flags : 0;
     ch->opt     = opt ? *opt : (xlink_opt_t)XLINK_OPT_DEFAULT;
     ch->errbuf[0] = '\0';
+    ch->zc.efd   = -1;         /* eventfd created lazily */
 
     ch->use_framing = (type == XLINK_PIPE || type == XLINK_TCP
                        || type == XLINK_SERIAL);
@@ -859,6 +861,13 @@ int xlink_send_zc(xlink_channel_t *ch,
     ch->zc.entries[h].status = status;
     ch->zc.head = (h + 1) % XLINK_ZC_DONE_CAP;
 
+    /* Signal eventfd if async notification is enabled */
+    if (ch->zc.efd >= 0) {
+        uint64_t n = 1;
+        ssize_t w = write(ch->zc.efd, &n, sizeof(n));
+        (void)w;  /* best-effort */
+    }
+
     return rc;
 }
 
@@ -882,12 +891,29 @@ void xlink_recv_zc_done(xlink_channel_t *ch, void *data) {
 int xlink_zc_poll(xlink_channel_t *ch) {
     if (!ch) return -1;
 
+    /* Drain eventfd counter along with ring entries */
+    if (ch->zc.efd >= 0) {
+        uint64_t val = 0;
+        ssize_t r = read(ch->zc.efd, &val, sizeof(val));
+        (void)r;  /* best-effort */
+    }
+
     int count = 0;
     while (ch->zc.tail != ch->zc.head) {
         ch->zc.tail = (ch->zc.tail + 1) % XLINK_ZC_DONE_CAP;
         count++;
     }
     return count;
+}
+
+int xlink_zc_notify_fd(xlink_channel_t *ch) {
+    if (!ch) return -1;
+
+    /* Lazy-create eventfd on first call */
+    if (ch->zc.efd < 0) {
+        ch->zc.efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    }
+    return ch->zc.efd;
 }
 
 void xlink_dump(xlink_channel_t* ch, int fd) {

@@ -65,6 +65,7 @@ struct xlink_zc_state {
     int                        head;       /* producer (add completions) */
     int                        tail;       /* consumer (zcpoll drains) */
     uint64_t                   next_tag;   /* monotonic tag allocator */
+    int                        efd;        /* eventfd for async notification (-1 = none) */
 };
 
 /* ─── Channel struct (exposed to backends) ────────────── */
