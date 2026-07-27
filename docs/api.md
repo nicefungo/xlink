@@ -193,7 +193,7 @@ void xlink_close(xlink_channel_t* ch);
 int xlink_zc_capable(xlink_channel_t *ch);
 ```
 
-**返回：** 1 表示支持零拷贝，0 不支持，-1 出错。当前仅 SHM 支持（需 SPSC 模式）。
+**返回：** 1 表示支持零拷贝，0 不支持，-1 出错。SHM（SPSC 模式）和 TCP 客户端模式支持。
 
 ### xlink_send_zc
 
@@ -212,7 +212,7 @@ int xlink_send_zc(xlink_channel_t *ch, const xlink_zc_buf_t *buf,
                   xlink_zc_done_fn done, void *userdata);
 ```
 
-零拷贝发送。SHM 后端立即完成（同步），数据直接写入共享内存的 SPSC data ring。
+零拷贝发送。SHM 后端立即完成（同步），数据直接写入共享内存的 SPSC data ring。TCP 后端使用 Linux `sendmsg(MSG_ZEROCOPY)` 异步完成，需通过 `xlink_zc_poll()` 轮询内核错误队列获取完成通知。
 
 ```c
 xlink_zc_buf_t buf = { .addr = msg, .len = len, .tag = 1 };

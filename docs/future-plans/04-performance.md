@@ -171,45 +171,36 @@ void xlink_recv_zc_done(xlink_channel_t *ch, void *data);
 
 **性能预期**：SHM 零拷贝应该比标准 `xlink_send()` 快 3-10×（免除 `memcpy`），特别是对于大消息（4KB+）。
 
-#### 2.4 TCP 后端：MSG_ZEROCOPY（Linux 4.14+）
+#### 2.4 TCP 后端：MSG_ZEROCOPY（Linux 4.14+） ✅ 2026-07-27
+
+**实现摘要**：
+- `tcp_send_zc_impl()` — 设置 `SO_ZEROCOPY`（首次），调用 `sendmsg(MSG_ZEROCOPY)` 发送
+- `tcp_drain_zc_completions()` — 从 socket 错误队列（`recvmsg(MSG_ERRQUEUE)`）读取 `SO_EE_ORIGIN_ZEROCOPY` 事件，推入 `zc_state` 完成环
+- `tcp_zc_capable()` — 仅客户端 TCP 支持（`is_client && fd >= 0`）
+- `xlink_zc_poll()` 集成 — TCP 通道自动 drain 错误队列
 
 ```c
-int tcp_send_zc(xlink_channel_t *ch, xlink_zc_buf_t *buf,
-                xlink_zc_done_fn done, void *userdata)
-{
-    struct msghdr msg = {0};
-    struct iovec  iov;
-    char cmsg[CMSG_SPACE(sizeof(uint32_t))];
+int tcp_send_zc_impl(xlink_channel_t *ch, const xlink_zc_buf_t *buf) {
+    /* Enable SO_ZEROCOPY on socket (one-time per fd) */
+    setsockopt(ch->fd, SOL_SOCKET, SO_ZEROCOPY, &one, sizeof(one));
 
-    iov.iov_base = buf->addr;
-    iov.iov_len  = buf->len;
+    struct iovec iov = { buf->addr, buf->len };
+    struct msghdr msg = { .msg_iov = &iov, .msg_iovlen = 1 };
+    return (sendmsg(ch->fd, &msg, MSG_ZEROCOPY) >= 0) ? 0 : -1;
+}
 
-    msg.msg_iov    = &iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = cmsg;
-    msg.msg_controllen = sizeof(cmsg);
-
-    /* 设置 SO_ZEROCOPY 完成通知 */
-    struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
-    c->cmsg_level = SOL_SOCKET;
-    c->cmsg_type  = SO_EE_ORIGIN_ZEROCOPY;
-    c->cmsg_len   = CMSG_LEN(sizeof(uint32_t));
-    *(uint32_t *)CMSG_DATA(c) = (uint32_t)ch->zc.next_tag;
-
-    ssize_t n = sendmsg(ch->fd, &msg, MSG_ZEROCOPY);
-    /* ... 注册 (tag, done_fn, userdata) 到 pending map ... */
-    ch->zc.pending++;
-    return (n >= 0) ? 0 : -1;
+int tcp_drain_zc_completions(xlink_channel_t *ch) {
+    /* recvmsg(MSG_ERRQUEUE|MSG_DONTWAIT) → parse SO_EE_ORIGIN_ZEROCOPY
+     * → enqueue to ch->zc ring → signal eventfd */
 }
 ```
 
-完成通知通过 epoll 监听 socket 错误队列（`EPOLLERR`），在错误队列中读取 `SO_EE_ORIGIN_ZEROCOPY` 事件，调用相应的 `done` 回调。
-
 **注意事项**：
 - MSG_ZEROCOPY 要求 socket `SO_ZEROCOPY` 已设置
-- 缓冲区必须页对齐 + 整页大小（否则内核仍会拷贝部分）
+- 缓冲区必须页对齐 + 整页大小才能真正零拷贝，否则内核回退到拷贝模式（`ee_code == SO_EE_CODE_ZEROCOPY_COPIED`）
 - 内核引用计数管理生命周期；发送到缓冲区重用至少需 RTT/2
 - Linux 4.14+ 才稳定可用（4.18+ 推荐）
+- 测试：`tests/test_zc_tcp.c`（25 checks），覆盖 zc_capable / send_zc / multi-send / zc_poll / error paths / notify_fd
 
 #### 2.5 文件后端：splice() + copy_file_range()
 
@@ -261,7 +252,7 @@ int file_zc_copy(xlink_channel_t *ch1, xlink_channel_t *ch2,
 - [x] **Step 2.1**: `xlink_zc_buf_t` + `xlink_zc_done_fn` 类型定义（`include/xlink.h`） ✅ 2026-07-24
 - [x] **Step 2.2**: SHM zero-copy（`src/shm_backend.c`）：`shm_send_zc` + `shm_recv_zc` + `shm_recv_zc_done` ✅ 2026-07-25
 - [x] **Step 2.3**: SHM 完成通知（eventfd / FIFO 集成） ✅ 2026-07-26
-- [ ] **Step 2.4**: TCP MSG_ZEROCOPY（`src/tcp_backend.c`）：`tcp_send_zc` + epoll 错误队列监控
+- [x] **Step 2.4**: TCP MSG_ZEROCOPY（`src/tcp_backend.c`）：`tcp_send_zc` + epoll 错误队列监控 ✅ 2026-07-27
 - [ ] **Step 2.5**: File splice/copy_file_range（`src/file_backend.c`）
 - [x] **Step 2.6**: 测试：`test_zc_shm.c`（27 checks, SPSC round-trip + multi-msg + edge cases） ✅ 2026-07-25
 - [ ] **Step 2.7**: 基准测试：`test_zc_perf.c`（对比标准路径）

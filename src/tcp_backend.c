@@ -28,6 +28,7 @@
 #include <netinet/tcp.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <linux/errqueue.h>
 
 /* ─── Private state ────────────────────────────────────── */
 
@@ -848,6 +849,162 @@ static int tcp_backend_read(xlink_channel_t* ch, void* buf, size_t len, int time
     return (ret == 0) ? (int)n : -1;
 }
 
+/* ─── Zero-copy (MSG_ZEROCOPY) ──────────────────────────── */
+
+#include <sys/eventfd.h>
+
+/* Check if this TCP channel supports zero-copy.
+ * Only client-mode TCP connections are eligible. */
+static int tcp_zc_capable(xlink_channel_t *ch) {
+    tcp_priv_t *p = (tcp_priv_t *)ch->priv;
+    if (!p || !p->is_client) return 0;
+    return (ch->fd >= 0) ? 1 : 0;
+}
+
+/* Drain the socket error queue for MSG_ZEROCOPY completions.
+ * Pushes completed tags into ch->zc ring and signals eventfd.
+ * Returns number of completions drained, -1 on error.
+ *
+ * This is called by xlink_zc_poll() before draining the ring,
+ * giving users a unified polling interface. */
+int tcp_drain_zc_completions(xlink_channel_t *ch) {
+    int fd = ch->fd;
+    if (fd < 0) return 0;
+
+    /* MSG_ERRQUEUE reads from the error queue.
+     * MSG_DONTWAIT makes it non-blocking. */
+    uint8_t cmsg_buf[256];
+    uint8_t data_buf[1];
+
+    struct iovec iov;
+    iov.iov_base = data_buf;
+    iov.iov_len  = sizeof(data_buf);
+
+    struct msghdr msg;
+    int drained = 0;
+
+    for (;;) {
+        memset(&msg, 0, sizeof(msg));
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = cmsg_buf;
+        msg.msg_controllen = sizeof(cmsg_buf);
+
+        ssize_t n = recvmsg(fd, &msg, MSG_ERRQUEUE | MSG_DONTWAIT);
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break;  /* empty error queue */
+            return -1;
+        }
+
+        /* Parse cmsg for SO_EE_ORIGIN_ZEROCOPY */
+        for (struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
+             c != NULL; c = CMSG_NXTHDR(&msg, c)) {
+
+            if (c->cmsg_level == SOL_IP || c->cmsg_level == SOL_IPV6) {
+                if (c->cmsg_type == IP_RECVERR || c->cmsg_type == IPV6_RECVERR) {
+                    struct sock_extended_err *ee =
+                        (struct sock_extended_err *)CMSG_DATA(c);
+
+                    if (ee->ee_origin == SO_EE_ORIGIN_ZEROCOPY) {
+                        uint32_t lo = ee->ee_info;
+                        uint32_t hi = ee->ee_data;
+                        uint64_t tag = ((uint64_t)hi << 32) | lo;
+                        int status = (ee->ee_code == SO_EE_CODE_ZEROCOPY_COPIED) ? -1 : 0;
+
+                        /* Enqueue to completion ring */
+                        int h = ch->zc.head;
+                        ch->zc.entries[h].tag    = tag;
+                        ch->zc.entries[h].status = status;
+                        ch->zc.head = (h + 1) % XLINK_ZC_DONE_CAP;
+                        drained++;
+
+                        /* Signal eventfd if async notification enabled */
+                        if (ch->zc.efd >= 0) {
+                            uint64_t one = 1;
+                            ssize_t w = write(ch->zc.efd, &one, sizeof(one));
+                            (void)w;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return drained;
+}
+
+/* TCP zero-copy send via MSG_ZEROCOPY.
+ * The kernel will notify completion via the socket error queue.
+ * Enables SO_ZEROCOPY on first call.
+ *
+ * MSG_ZEROCOPY semantics (Linux 4.14+):
+ * - Set SO_ZEROCOPY on the socket before use
+ * - call sendmsg(fd, &msg, MSG_ZEROCOPY) — kernel will zero-copy
+ *   the buffer pages if possible, or fall back to copying if not
+ * - completion notifications appear on the socket error queue
+ *   as SO_EE_ORIGIN_ZEROCOPY messages with ee_info/ee_data encoding
+ *   the 64-bit notification token
+ * - user must NOT free/reuse the buffer until notification arrives
+ */
+static int tcp_send_zc_impl(xlink_channel_t *ch, const xlink_zc_buf_t *buf) {
+    tcp_priv_t *p = (tcp_priv_t *)ch->priv;
+
+    if (!p || !p->is_client) {
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "tcp_send_zc: server mode not supported (use client mode)");
+        return -1;
+    }
+
+    if (ch->fd < 0) {
+        ch->fd = try_reconnect(p, ch);
+        if (ch->fd < 0) return -1;
+    }
+
+    /* Enable SO_ZEROCOPY on first use per socket */
+    static int zc_fd = -1;
+    if (zc_fd != ch->fd) {
+        int one = 1;
+        if (setsockopt(ch->fd, SOL_SOCKET, SO_ZEROCOPY,
+                       &one, sizeof(one)) != 0) {
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "tcp_send_zc: SO_ZEROCOPY not supported "
+                     "(requires Linux 4.14+)");
+            return -1;
+        }
+        zc_fd = ch->fd;
+    }
+
+    /* For MSG_ZEROCOPY, sendmsg is called with just the data and the
+     * MSG_ZEROCOPY flag. The kernel tracks completions internally
+     * via socket error queue SO_EE_ORIGIN_ZEROCOPY events. */
+    struct iovec iov;
+    iov.iov_base = buf->addr;
+    iov.iov_len  = buf->len;
+
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov    = &iov;
+    msg.msg_iovlen = 1;
+
+    ssize_t n = sendmsg(ch->fd, &msg, MSG_ZEROCOPY);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "tcp_send_zc: EAGAIN (send buffer full)");
+        } else {
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "tcp_send_zc: sendmsg: %s", strerror(errno));
+        }
+        return -1;
+    }
+
+    /* MSG_ZEROCOPY uses the return value as the notification token.
+     * The kernel returns the low bits of the buffer length or 0.
+     * ee_info and ee_data carry notification details in error queue. */
+    return 0;
+}
+
 /* ─── Backend vtable ────────────────────────────────────── */
 
 const xlink_backend_t xlink_tcp_backend = {
@@ -860,4 +1017,9 @@ const xlink_backend_t xlink_tcp_backend = {
     .write = NULL,
     .read  = tcp_backend_read,
     .peek  = NULL,
+
+    .send_zc      = tcp_send_zc_impl,
+    .recv_zc      = NULL,
+    .recv_zc_done = NULL,
+    .zc_capable   = tcp_zc_capable,
 };

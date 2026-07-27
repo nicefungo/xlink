@@ -891,6 +891,12 @@ void xlink_recv_zc_done(xlink_channel_t *ch, void *data) {
 int xlink_zc_poll(xlink_channel_t *ch) {
     if (!ch) return -1;
 
+    /* For TCP: drain MSG_ZEROCOPY error queue completions first */
+    if (ch->backend->type == XLINK_TCP && ch->fd >= 0) {
+        extern int tcp_drain_zc_completions(xlink_channel_t *ch);
+        tcp_drain_zc_completions(ch);
+    }
+
     /* Drain eventfd counter along with ring entries */
     if (ch->zc.efd >= 0) {
         uint64_t val = 0;
