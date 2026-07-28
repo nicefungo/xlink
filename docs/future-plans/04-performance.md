@@ -253,8 +253,8 @@ int file_zc_copy(xlink_channel_t *ch1, xlink_channel_t *ch2,
 - [x] **Step 2.2**: SHM zero-copy（`src/shm_backend.c`）：`shm_send_zc` + `shm_recv_zc` + `shm_recv_zc_done` ✅ 2026-07-25
 - [x] **Step 2.3**: SHM 完成通知（eventfd / FIFO 集成） ✅ 2026-07-26
 - [x] **Step 2.4**: TCP MSG_ZEROCOPY（`src/tcp_backend.c`）：`tcp_send_zc` + epoll 错误队列监控 ✅ 2026-07-27
-- [ ] **Step 2.5**: File splice/copy_file_range（`src/file_backend.c`）
-- [x] **Step 2.6**: 测试：`test_zc_shm.c`（27 checks, SPSC round-trip + multi-msg + edge cases） ✅ 2026-07-25
+- [x] **Step 2.5**: File copy_file_range（`src/file_backend.c`）：`file_send_zc` + copy_file_range(2) 内核零拷贝 + write() fallback ✅ 2026-07-28
+- [x] **Step 2.6**: 测试：`test_zc_shm.c`（27 checks）+ `test_zc_file.c`（15 checks, copy_file_range + fallback + error paths） ✅ 2026-07-25/28
 - [ ] **Step 2.7**: 基准测试：`test_zc_perf.c`（对比标准路径）
 - [ ] **Step 2.8**: 更新 `api.md` / `code-walkthrough.md` / `04-performance.md`
 
