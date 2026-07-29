@@ -1113,4 +1113,43 @@ hardware counter recipes, and cache-line alignment documentation.
 
 ---
 
-*End of code walkthrough. ~2,600 lines of reference source, ~540 lines of documentation.*
+## 23. Zero-Copy Performance Benchmark
+
+`tests/test_zc_perf.c` — created 2026-07-29.
+
+Compares `xlink_send()` vs `xlink_send_zc()` throughput for SHM SPSC and TCP
+channels. Measures send-side wall-clock time for 256B (small) and 64KB (large)
+payloads at 2000 (SHM) and 1000 (TCP) iterations.
+
+Key observations:
+- SHM: `send_zc` throughput comparable to `send` for small messages; smaller
+  advantage than expected because the completion ring adds overhead on the
+  hot path. True zero-copy advantage manifests in cross-process scenarios
+  where data stays in shared memory.
+- TCP: MSG_ZEROCOPY wins for 64KB payloads (+13.7% throughput) but loses for
+  256B payloads (-38%) due to error queue polling overhead. Recommended for
+  bulk data transfer (>4KB).
+- Completion ring (`XLINK_ZC_DONE_CAP = 64`) must be drained periodically
+  during high-throughput sends to avoid overwriting entries.
+
+See `docs/future-plans/04-performance.md` §2.8 for full benchmark data.
+
+---
+
+## 24. ZC Completion Notification (eventfd)
+
+`src/xlink.c` — `xlink_zc_notify_fd()` added 2026-07-26.
+
+Returns an eventfd descriptor that is readable when zero-copy send completions
+are pending (triggered after `xlink_send_zc()` enqueues to the completion ring).
+The fd is lazy-created on first call (`EFD_NONBLOCK | EFD_CLOEXEC`).
+Integrates with `epoll` / `xlink_wait_aio()` event loops — applications can
+monitor the notify fd alongside channel fds instead of polling `xlink_zc_poll()`
+in a busy loop.
+
+`xlink_zc_poll()` drains the eventfd counter along with ring entries,
+ensuring the fd stays edge-triggered.
+
+---
+
+*End of code walkthrough. ~2,600 lines of reference source, ~560 lines of documentation.*

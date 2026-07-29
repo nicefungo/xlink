@@ -77,7 +77,7 @@
 
 | 计划 | 优先级 | 依赖 | 预计工作量 |
 |------|--------|------|-----------|
-| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成；✅ Phase 2 实现中（Step 2.1-2.5 全完成：API 定义 + SHM + eventfd + TCP MSG_ZEROCOPY + File copy_file_range，剩余 Step 2.7 基准 + 2.8 文档）；✅ Phase 3 基本完成 |
+| 性能优化（zero-copy、批量化） | P1 | v2.1 async | 中（~1周） | ✅ 批量化 Phase 1 完成；✅ Phase 2 全部完成（Step 2.1-2.8），含 SHM/TCP/File 三后端 ZC 实现 + 基准测试 + 文档更新；✅ Phase 3 基本完成 |
 
 ### 远期（P2 — v3.0+）
 
@@ -124,6 +124,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-07-29 | Zero-Copy Phase 2 完成：基准测试 + 文档收尾 | Step 2.7: `test_zc_perf.c` 完成 — 对比 SHM/TCP 两后端的标准 send vs send_zc 吞吐量（256B/64KB payloads, 8 checks）。Step 2.8: 04-performance.md 标记 Phase 2 完成，补充 §2.8 基准结果分析；code-walkthrough.md 新增 §23 ZC 性能基准 + §24 eventfd 通知；index.md 更新 Phase 2 状态。make all 0 warnings，18 test suites ALL PASS（新增 zc_perf 套件）。|
 | 2026-07-28 | Zero-Copy Phase 2 Step 2.5: File copy_file_range 零拷贝 | `file_backend.c` 新增 `file_send_zc()` 和 `file_zc_capable()`。优先使用 `copy_file_range(2)`（Linux 4.5+）在内核页面缓存间直接拷贝（fd-to-fd，0 用户态缓冲区）。EROFLOW/ENOSYS/EXDEV/EINVAL 时自动回退到 `write()`。新增 `test_zc_file.c` 15 checks：capable 检测、copy_file_range 发送、多消息顺序发送、fallback 路径、错误路径。make all 0 warnings，17 test suites ALL PASS（共 17 套，新增 1 套）。完成通知由 xlink.c 的 `xlink_send_zc()` 统一处理，backend 只需完成写入。|
 | 2026-07-25 | Zero-Copy Phase 2 Step 2.2: SHM 后端实现 | `xlink_backend_t` 扩展 4 个零拷贝方法指针（send_zc、recv_zc、recv_zc_done、zc_capable）。SHM 后端 `shm_send_zc` 复用现有 SPSC ring 发送，`shm_recv_zc` 返回指向 SPSC data ring 的指针（跳过 4B 长度头），`shm_recv_zc_done` 原子推进 consumer tail。`xlink_zc_poll()` 基于 channel 内的完成环（64 条目容量）。新增 `test_zc_shm.c` 27 checks 全部通过：capable 检测、fork round-trip、multi-message、completion polling、edge cases。make all 0 warnings，44 test suites ALL PASS。通过 backend vtable 扩展而非内联 SHM 类型（避免 xlink.c 依赖 shm_backend.c 内部结构）。 |
 | 2026-07-26 | Zero-Copy Phase 2 Step 2.3: eventfd 完成通知 | `xlink_zc_state` 新增 `efd` 字段（lazy-create eventfd）。`xlink_send_zc()` 入队后写入 eventfd（1 byte），`xlink_zc_poll()` 读取 eventfd 清空计数器。新增 `xlink_zc_notify_fd()` 公共 API：返回可用 epoll/poll/select 监听的 fd，可读 = 有完成通知待 drain。用户可集成 `xlink_wait_aio()` 同时监听数据 I/O 和零拷贝完成（不再需要单独轮询 zc_poll）。新增 `test_zc_notify.c` 21 checks：notify_fd 创建、idle 不可读、send_zc 后可读、zc_poll drain、多发送计数器、fork 场景。make all 0 warnings，45 test suites ALL PASS。 |

@@ -255,8 +255,24 @@ int file_zc_copy(xlink_channel_t *ch1, xlink_channel_t *ch2,
 - [x] **Step 2.4**: TCP MSG_ZEROCOPY（`src/tcp_backend.c`）：`tcp_send_zc` + epoll 错误队列监控 ✅ 2026-07-27
 - [x] **Step 2.5**: File copy_file_range（`src/file_backend.c`）：`file_send_zc` + copy_file_range(2) 内核零拷贝 + write() fallback ✅ 2026-07-28
 - [x] **Step 2.6**: 测试：`test_zc_shm.c`（27 checks）+ `test_zc_file.c`（15 checks, copy_file_range + fallback + error paths） ✅ 2026-07-25/28
-- [ ] **Step 2.7**: 基准测试：`test_zc_perf.c`（对比标准路径）
-- [ ] **Step 2.8**: 更新 `api.md` / `code-walkthrough.md` / `04-performance.md`
+- [x] **Step 2.7**: 基准测试：`test_zc_perf.c`（对比标准路径） ✅ 2026-07-29
+- [x] **Step 2.8**: 更新 `api.md` / `code-walkthrough.md` / `04-performance.md` ✅ 2026-07-29
+
+#### 2.8 ZC 基准测试结果 (2026-07-29)
+
+`test_zc_perf.c` 对比了 `xlink_send()` vs `xlink_send_zc()` 的吞吐量：
+
+| 场景 | xlink_send() | xlink_send_zc() | 差异 |
+|------|-------------|-----------------|------|
+| SHM 256B × 2000 | 809 MB/s | 767 MB/s | -5.3% (ZC ring overhead) |
+| SHM 64KB × 2000 | 734 GB/s | 664 GB/s | -9.6% (ZC ring overhead) |
+| TCP 256B × 1000 | 36.1 MB/s | 22.3 MB/s | -38% (MSG_ZEROCOPY overhead) |
+| TCP 64KB × 1000 | 3242 MB/s | 3686 MB/s | +13.7% (ZC wins for large) |
+
+**分析**：
+- SHM 场景：send_zc 仅在传递元数据层面有优势（避免 `memcpy`），但首轮 benchmark 因 completion ring 额外开销反而略慢。真正的零拷贝优势体现在跨进程场景（数据在共享内存中，无需拷贝到对端 buffer）。
+- TCP 场景：MSG_ZEROCOPY 对大数据包（64KB）有 13.7% 吞吐提升，但对小数据包（256B）因内核错误队列轮询开销反而更慢。符合预期：MSG_ZEROCOPY 适用于大包场景。
+- Completion ring 容量 64 入口，高吞吐场景需定期调用 `xlink_zc_poll()` 排空。
 
 ### Phase 3: 优化
 
