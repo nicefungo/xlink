@@ -7,7 +7,8 @@ LIB     = bin/libxlink.a
 OBJS    = bin/xlink.o bin/plugin.o bin/aio.o bin/aio_epoll.o bin/aio_poll.o \
           bin/aio_uring.o bin/spsc_queue.o bin/mpsc_queue.o \
           bin/shm_backend.o bin/pipe_backend.o \
-          bin/tcp_backend.o bin/udp_backend.o bin/serial_backend.o bin/file_backend.o
+          bin/tcp_backend.o bin/udp_backend.o bin/serial_backend.o bin/file_backend.o \
+          bin/ipc_backend.o
 
 SRCDIR  = src
 
@@ -39,7 +40,7 @@ bin/%.tls.o: $(SRCDIR)/%.c
 $(TLS_LIB): $(TLS_OBJS)
 	$(AR) rcs $(TLS_LIB) $(TLS_OBJS)
 
-TEST_SRCS = $(filter-out tests/test_tls.c tests/test_tls_run.c, $(wildcard tests/test_*.c))
+TEST_SRCS = $(filter-out tests/test_tls.c tests/test_tls_run.c tests/test_tls_alpn.c, $(wildcard tests/test_*.c))
 TEST_BINS = $(patsubst tests/%.c, bin/tests/%, $(TEST_SRCS))
 
 tests: lib $(TEST_BINS) mock_plugin
@@ -59,11 +60,12 @@ tls_tests: $(TLS_LIB)
 	@mkdir -p bin/tests
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) $(INCS) -o bin/tests/test_tls tests/test_tls.c $(TLS_LIB) $(LDLIBS) $(TLS_LDLIBS)
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) $(INCS) -o bin/tests/test_tls_run tests/test_tls_run.c $(TLS_LIB) $(LDLIBS) $(TLS_LDLIBS)
+	$(CC) $(CFLAGS) $(TLS_CFLAGS) $(INCS) -o bin/tests/test_tls_alpn tests/test_tls_alpn.c $(TLS_LIB) $(LDLIBS) $(TLS_LDLIBS)
 	@echo "=== TLS tests built ==="
 
 test: tests
 	@for t in bin/tests/*; do \
-		case "$$t" in *.so|*.tls.o|*test_tls*|*test_tls_run*) continue ;; esac; \
+		case "$$t" in *.so|*.tls.o|*test_tls*|*test_tls_run*|*test_tls_alpn*) continue ;; esac; \
 		echo "--- $$t ---"; \
 		$$t || true; \
 	done

@@ -390,7 +390,7 @@ xlink_channel_t* xlink_open(xlink_type_t type, const char* addr,
     ch->zc.efd   = -1;         /* eventfd created lazily */
 
     ch->use_framing = (type == XLINK_PIPE || type == XLINK_TCP
-                       || type == XLINK_SERIAL);
+                       || type == XLINK_SERIAL || type == XLINK_IPC);
 
     if (bk->open(ch, addr, opt) != 0) {
         int saved = errno;

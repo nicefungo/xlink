@@ -30,6 +30,7 @@ typedef enum {
     XLINK_SERIAL,   /* RS-232 / RS-485 serial port                 */
     XLINK_RTSP,     /* RTSP client (pull video/audio stream)       */
     XLINK_FILE,     /* File I/O (dump / replay)                    */
+    XLINK_IPC,      /* AF_UNIX stream socket (Unix domain IPC)     */
 } xlink_type_t;
 
 /* ─── Open Flags ──────────────────────────────────────── */
@@ -51,6 +52,9 @@ typedef struct {
     const char *ca_file;        /* CA cert for peer verification         */
     int         verify_peer;    /* non-zero = verify peer certificate    */
     const char *sni_hostname;   /* SNI hostname (client mode)            */
+    const char *alpn_protos;    /* comma-separated ALPN list, e.g.
+                                   "xlink/1,xlink/json"                  */
+    char        alpn_negotiated[64]; /* output: negotiated protocol     */
 } xlink_tls_config_t;
 
 /* ─── Open Options ────────────────────────────────────── */
@@ -93,6 +97,11 @@ typedef struct xlink_channel xlink_channel_t;
  *   XLINK_SERIAL "/dev/ttyX:baud"   — e.g. "/dev/ttyUSB0:115200"
  *   XLINK_RTSP   "rtsp://..."       — RTSP stream URL
  *   XLINK_FILE   "/path/to/file"    — for dump / replay
+ *   XLINK_IPC    "/path/to/socket"  — AF_UNIX client
+ *                "ipc:///path"      — URL form, auto-detect
+ *
+ * Use XLINK_SERVER flag for bind+listen (server mode),
+ * otherwise connect to existing socket (client mode).
  *
  * Returns NULL on error (check xlink_errstr).
  */
@@ -298,6 +307,11 @@ int xlink_tls_handshake_state(xlink_channel_t *ch);
 /* Continue a non-blocking TLS handshake step.
  * Returns 0 on completion, 1 if more I/O needed, -1 on fatal error. */
 int xlink_tls_handshake_continue(xlink_channel_t *ch);
+
+/* Get the ALPN protocol negotiated during TLS handshake.
+ * Returns pointer to negotiated protocol string, or NULL if no ALPN.
+ * Only valid after handshake completes (returns NULL during handshake). */
+const char *xlink_tls_alpn_negotiated(xlink_channel_t *ch);
 
 #endif /* XLINK_HAS_TLS */
 

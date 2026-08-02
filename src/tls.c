@@ -39,7 +39,9 @@ typedef struct {
     int      is_server;   /* 1 = server (SSL_accept), 0 = client (SSL_connect) */
     int      handshake_done;
     int      configured;
-    tls_hs_state_t hs_state; /* non-blocking handshake state */
+    tls_hs_state_t hs_state;    /* non-blocking handshake state */
+    char     alpn_negotiated[64]; /* negotiated ALPN protocol (filled after handshake) */
+    char    *alpn_protos_copy;    /* strdup'd server protos for ALPN callback */
 } tls_state_t;
 
 /* ─── Global init / cleanup ───────────────────────────── */
@@ -52,6 +54,41 @@ static void tls_global_init(void) {
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
     g_tls_init_done = 1;
+}
+
+/* ─── ALPN select callback ────────────────────────────── */
+
+static int tls_alpn_select_callback(SSL *ssl, const unsigned char **out,
+                                     unsigned char *outlen,
+                                     const unsigned char *in,
+                                     unsigned int inlen, void *arg) {
+    (void)ssl;
+    const char *server_protos = (const char *)arg;
+    if (!server_protos) return SSL_TLSEXT_ERR_OK;
+
+    for (unsigned int i = 0; i < inlen; ) {
+        unsigned char len = in[i];
+        if (len == 0 || i + 1 + len > inlen) break;
+        const char *client_proto = (const char *)(in + i + 1);
+
+        /* Match against server's comma-separated list */
+        const char *sp = server_protos;
+        while (*sp) {
+            const char *end = sp;
+            while (*end && *end != ',') end++;
+            size_t slen = (size_t)(end - sp);
+            if (len == (unsigned char)slen &&
+                memcmp(client_proto, sp, slen) == 0) {
+                *out = in + i + 1;
+                *outlen = len;
+                return SSL_TLSEXT_ERR_OK;
+            }
+            sp = end + (*end ? 1 : 0);
+        }
+        i += 1 + len;
+    }
+    /* No match — don't fail the handshake, just don't select */
+    return SSL_TLSEXT_ERR_OK;
 }
 
 /* ─── SSL_CTX creation ────────────────────────────────── */
@@ -130,6 +167,15 @@ int xlink_tls_configure(xlink_channel_t *ch,
         return -1;
     }
 
+    /* Server ALPN: set up select callback (done here so we can store
+     * the protos string in ts for cleanup). Must be done before SSL_new. */
+    if (cfg->alpn_protos && is_server) {
+        ts->alpn_protos_copy = strdup(cfg->alpn_protos);
+        if (ts->alpn_protos_copy)
+            SSL_CTX_set_alpn_select_cb(ts->ctx, tls_alpn_select_callback,
+                                       ts->alpn_protos_copy);
+    }
+
     ts->ssl = SSL_new(ts->ctx);
     if (!ts->ssl) {
         snprintf(ch->errbuf, sizeof(ch->errbuf),
@@ -142,6 +188,27 @@ int xlink_tls_configure(xlink_channel_t *ch,
 
     ts->is_server = is_server;
     ts->configured = 1;
+
+    /* ALPN client: set advertised protocols on the SSL object */
+    if (!is_server && cfg->alpn_protos) {
+        unsigned char wire[512];
+        const char *s = cfg->alpn_protos;
+        int len = 0;
+        while (*s) {
+            const char *end = s;
+            while (*end && *end != ',') end++;
+            size_t seg = (size_t)(end - s);
+            if (seg > 255) break;
+            if (seg == 0) { s = end + (*end ? 1 : 0); continue; }
+            if (len + (int)seg + 1 > (int)sizeof(wire)) break;
+            wire[len++] = (unsigned char)seg;
+            memcpy(wire + len, s, seg);
+            len += (int)seg;
+            s = end + (*end ? 1 : 0);
+        }
+        if (len > 0)
+            SSL_set_alpn_protos(ts->ssl, wire, (unsigned int)len);
+    }
 
     /* SNI (client mode) */
     if (!is_server && cfg->sni_hostname)
@@ -193,6 +260,21 @@ static int tls_do_handshake(xlink_channel_t *ch, tls_state_t *ts) {
         /* success */
         ts->handshake_done = 1;
         ts->hs_state = TLS_HS_DONE;
+
+        /* Read ALPN negotiated protocol (if any) */
+        {
+            const unsigned char *alpn_data = NULL;
+            unsigned int alpn_len = 0;
+            SSL_get0_alpn_selected(ts->ssl, &alpn_data, &alpn_len);
+            ts->alpn_negotiated[0] = '\0';
+            if (alpn_data && alpn_len > 0) {
+                size_t n = alpn_len < sizeof(ts->alpn_negotiated) - 1
+                           ? alpn_len : sizeof(ts->alpn_negotiated) - 1;
+                memcpy(ts->alpn_negotiated, alpn_data, n);
+                ts->alpn_negotiated[n] = '\0';
+            }
+        }
+
         return 0;
     }
 
@@ -316,6 +398,17 @@ int xlink_tls_read(xlink_channel_t *ch, void *buf, size_t *len) {
     return 0;
 }
 
+/* ─── ALPN query ──────────────────────────────────────── */
+
+const char *xlink_tls_alpn_negotiated(xlink_channel_t *ch) {
+    if (!ch || !ch->tls) return NULL;
+    tls_state_t *ts = (tls_state_t *)ch->tls;
+    /* Only valid after handshake completed */
+    if (!ts->handshake_done) return NULL;
+    if (ts->alpn_negotiated[0] == '\0') return NULL;
+    return ts->alpn_negotiated;
+}
+
 /* ─── Cleanup ─────────────────────────────────────────── */
 
 void xlink_tls_cleanup(xlink_channel_t *ch) {
@@ -328,6 +421,7 @@ void xlink_tls_cleanup(xlink_channel_t *ch) {
     }
     if (ts->ctx)
         SSL_CTX_free(ts->ctx);
+    free(ts->alpn_protos_copy);
 
     free(ts);
     ch->tls = NULL;
@@ -403,6 +497,11 @@ int xlink_tls_read(xlink_channel_t *ch, void *buf, size_t *len) {
 
 void xlink_tls_cleanup(xlink_channel_t *ch) {
     (void)ch;
+}
+
+const char *xlink_tls_alpn_negotiated(xlink_channel_t *ch) {
+    (void)ch;
+    return NULL;
 }
 
 #endif /* XLINK_HAS_TLS */

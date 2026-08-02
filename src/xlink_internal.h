@@ -90,6 +90,7 @@ extern const xlink_backend_t xlink_tcp_backend;
 extern const xlink_backend_t xlink_udp_backend;
 extern const xlink_backend_t xlink_file_backend;
 extern const xlink_backend_t xlink_serial_backend;
+extern const xlink_backend_t xlink_ipc_backend;
 
 /* ─── Plugin system ───────────────────────────────────── */
 

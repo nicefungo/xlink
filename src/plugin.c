@@ -52,6 +52,7 @@ static const xlink_plugin_t builtin_plugins[] = {
     BUILTIN_PLUGIN(XLINK_UDP,    "udp",    &xlink_udp_backend),
     BUILTIN_PLUGIN(XLINK_SERIAL, "serial", &xlink_serial_backend),
     BUILTIN_PLUGIN(XLINK_FILE,   "file",   &xlink_file_backend),
+    BUILTIN_PLUGIN(XLINK_IPC,    "ipc",    &xlink_ipc_backend),
 };
 
 void xlink_plugins_init(void) {

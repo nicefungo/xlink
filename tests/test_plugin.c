@@ -149,7 +149,7 @@ int main(void) {
     /* ─── xlink_plugin_count() ─── */
     printf("\n--- Plugin count ---\n");
     size_t cnt = xlink_plugin_count();
-    CHECK(cnt == 6, "plugin_count() == 6 (built-ins only)");
+    CHECK(cnt == 7, "plugin_count() == 7 (built-ins only)");
 
     /* ─── Dynamic .so loading ─── */
     printf("\n--- Dynamic .so loading ---\n");
@@ -165,7 +165,7 @@ int main(void) {
     CHECK(pl->backend != NULL, "loaded mock backend is set");
 
     cnt = xlink_plugin_count();
-    CHECK(cnt == 7, "plugin_count() == 7 after loading mock");
+    CHECK(cnt == 8, "plugin_count() == 8 after loading mock");
 
     /* Load nonexistent .so */
     ld_rc = xlink_plugin_load("bin/tests/nonexistent.so");
@@ -175,7 +175,7 @@ int main(void) {
     int urc = xlink_plugin_unregister("mock");
     CHECK(urc == 0, "unregister loaded 'mock' succeeds");
     cnt = xlink_plugin_count();
-    CHECK(cnt == 6, "plugin_count() == 6 after unregister");
+    CHECK(cnt == 7, "plugin_count() == 7 after unregister");
 #else
     printf("  SKIP: .so loading not available on this platform\n");
 #endif

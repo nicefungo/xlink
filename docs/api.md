@@ -41,6 +41,7 @@ xlink_channel_t* xlink_open(xlink_type_t type, const char* addr,
 | `XLINK_SERIAL` | `/dev/ttyX:baud` | `"/dev/ttyUSB0:115200"` |
 | `XLINK_RTSP` | `rtsp://...` URL | `"rtsp://camera/stream1"` |
 | `XLINK_FILE` | `/path/to/file` | `"/tmp/capture.bin"` |
+| `XLINK_IPC` | `/path/to/socket` (client)、`.sock:/path` (server) 或 `ipc:///path` | `"/tmp/xlink.sock"` / `"ipc:///tmp/xlink.sock"` |
 
 **返回：** 成功返回通道指针，失败返回 NULL（用 `xlink_errstr()` 或 `errno` 查原因）。
 
