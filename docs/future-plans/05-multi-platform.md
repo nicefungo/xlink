@@ -61,6 +61,7 @@ const char *xlink_pal_strerror(int err);
 | File   | ✅ | ✅ | ✅ | ⚠️ 可能需要 VFS |
 | Serial | ✅ | ✅ | ✅ | ⚠️ UART |
 | Pipe   | ✅ | ✅ | ✅ | ❌ |
+| IPC (AF_UNIX) | ✅ (src/ipc_backend.c, 2026-08) | ⚠️ 命名管道 | ⚠️ AF_UNIX | ❌ |
 | io_uring | ✅ | ❌ | ❌ | ❌ |
 | TLS    | ✅ OpenSSL | ✅ SChannel | ✅ SecureTransport | ⚠️ mbedTLS |
 
@@ -76,12 +77,35 @@ const char *xlink_pal_strerror(int err);
 ### Phase 2: Windows 支持
 
 - [ ] winsock2 适配
-- [ ] Windows 命名管道替代 Unix domain socket
+- [ ] **Windows 命名管道替代 AF_UNIX（IPC 后端）** — 见下方「AF_UNIX → 命名管道映射」
 - [ ] `CreateFileMapping` 替代 `shm_open`
 - [ ] Windows IOCP 替代 poll（可选）
 - [ ] MSVC / MinGW 构建支持（CMake）
 - [ ] 测试：Windows 上关键功能测试
 - [ ] CI: 添加 Windows runner
+
+### AF_UNIX → Windows 命名管道映射（2026-08 增补）
+
+2026-08-02 新增的 `src/ipc_backend.c`（XLINK_IPC，AF_UNIX SOCK_STREAM，`ipc://` 或裸路径）是
+本地进程间通信最轻量的后端（~30% 快于 localhost TCP，绕过网络栈）。Windows 上与其语义
+最接近的等价物是 **命名管道 (Named Pipes)**，映射关系如下：
+
+| AF_UNIX (Linux) | Windows Named Pipe | 说明 |
+|-----------------|--------------------|------|
+| `socket(AF_UNIX, SOCK_STREAM)` | `CreateNamedPipe` (PIPE_TYPE_BYTE) | 面向字节流，语义对应 SOCK_STREAM |
+| `bind()` 到路径 | `\\.\pipe\<name>` 命名 | IPC 地址天然是字符串，可直接复用 `ipc://` URL 的 path 部分 |
+| `listen()` + `accept()` | `ConnectNamedPipe` (server) | 服务器端阻塞等待客户端连接 |
+| `connect()` | `CreateFile` + `WaitNamedPipe` | 客户端连接（未就绪时可等待） |
+| `send()`/`recv()` | `WriteFile`/`ReadFile` (OVERLAPPED) | 用 overlapped I/O 对接现有 poll/事件循环 |
+| `unlink()` 清理 socket 文件 | 进程退出时管道自动消失 | Windows 无需显式清理，生命周期更简单 |
+| `poll()` 可读/可写事件 | 管道句柄 + `WaitForMultipleObjects` / IOCP | 事件模型需适配，无法直接复用 `xlink_poll` |
+
+**适配要点**：
+- `ipc_backend.c` 的 `create`/`connect`/`send`/`recv`/`close` vtable 五个入口是平台无关的，
+  只需在 PAL 层替换底层 syscall 即可，后端上层逻辑（framer、消息分帧、URL 解析）完全复用。
+- URL 解析 `ipc:///path` 已在 `xlink.c` 完成，`/path` 直接映射为 Windows 的 `\\.\pipe\path`。
+- 命名管道默认是**同步阻塞**的；要用 overlapped I/O 才能与 `xlink_wait_aio()` 事件循环集成，
+  这对应 Phase 2 中「Windows IOCP 替代 poll」的子任务。
 
 ### Phase 3: 嵌入式 RTOS
 

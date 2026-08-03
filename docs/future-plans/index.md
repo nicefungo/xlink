@@ -1,6 +1,6 @@
 # xlink 未来规划 — 路线图总览
 
-> 最后更新：2026-07-28 (Zero-Copy Phase 2 Step 2.5: File copy_file_range)
+> 最后更新：2026-08-03 (跨平台: IPC 后端 ↔ Windows 命名管道映射)
 
 ## 状态总览
 
@@ -124,6 +124,7 @@ SHM .read timeout ────── 无依赖（2026-05-28）
 
 | 日期 | 决策 | 背景 |
 |------|------|------|
+| 2026-08-03 | **跨平台文档深化：IPC 后端 ↔ Windows 命名管道映射** | 基于 08-02 新增的 `src/ipc_backend.c`（XLINK_IPC, AF_UNIX），将 05-multi-platform.md 平台支持矩阵补上 IPC 行（Linux ✅ / Windows ⚠️ 命名管道 / macOS ⚠️ AF_UNIX / FreeRTOS ❌），并新增「AF_UNIX → Windows 命名管道映射」章节：`socket/bind/listen/accept/connect/send/recv/unlink/poll` 逐一映射到 `CreateNamedPipe/CreateFile/ConnectNamedPipe/WriteFile/ReadFile/WaitForMultipleObjects/IOCP`。核心洞察：`ipc_backend.c` 的 vtable 五入口（create/connect/send/recv/close）平台无关，仅需 PAL 层替换底层 syscall，上层 framer/URL 解析完全复用；URL `ipc:///path` 直接映射 `\\.\pipe\path`。指出命名管道默认同步阻塞，需 overlapped I/O 才能接入 `xlink_wait_aio()` 事件循环。make all 0 warnings，make test 全绿（本轮仅文档变更）。 |
 | 2026-08-02 | **IPC (AF_UNIX) 后端 + TLS ALPN 协商交付** | 新增 `src/ipc_backend.c`(526行) AF_UNIX SOCK_STREAM 传输后端，支持 client/server 模式、地址 `ipc://`、`.sock:`、`/path` 三种格式，比 localhost TCP 快 ~30%（绕过网络栈）。`XLINK_IPC` 枚举 + `test_ipc.c` 39 checks 全过。`make all` 0 warnings，make test 全绿。同期完成 TLS ALPN：`xlink_tls_config_t` 新增 `alpn_protos`/`alpn_negotiated`，server 端 `SSL_CTX_set_alpn_select_cb` 强制协商，client 端 `SSL_set_alpn_protos` 通告，握手后 `SSL_get0_alpn_selected` 读取，新增 `xlink_tls_alpn_negotiated()` API。test_tls_alpn.c 4 用例（matching / no-match / client-only / server-only）。修复 no-match 场景测试挂起：RFC 7301 规定 server 配置 ALPN 时无匹配必须拒绝握手，测试原先错误期望握手继续；加 server 子进程 alarm(5) 看门狗防挂死。test_plugin.c 断言 6→7（新增内置后端）。 |
 | 2026-07-29 | Zero-Copy Phase 2 完成：基准测试 + 文档收尾 | Step 2.7: `test_zc_perf.c` 完成 — 对比 SHM/TCP 两后端的标准 send vs send_zc 吞吐量（256B/64KB payloads, 8 checks）。Step 2.8: 04-performance.md 标记 Phase 2 完成，补充 §2.8 基准结果分析；code-walkthrough.md 新增 §23 ZC 性能基准 + §24 eventfd 通知；index.md 更新 Phase 2 状态。make all 0 warnings，18 test suites ALL PASS（新增 zc_perf 套件）。|
 | 2026-07-28 | Zero-Copy Phase 2 Step 2.5: File copy_file_range 零拷贝 | `file_backend.c` 新增 `file_send_zc()` 和 `file_zc_capable()`。优先使用 `copy_file_range(2)`（Linux 4.5+）在内核页面缓存间直接拷贝（fd-to-fd，0 用户态缓冲区）。EROFLOW/ENOSYS/EXDEV/EINVAL 时自动回退到 `write()`。新增 `test_zc_file.c` 15 checks：capable 检测、copy_file_range 发送、多消息顺序发送、fallback 路径、错误路径。make all 0 warnings，17 test suites ALL PASS（共 17 套，新增 1 套）。完成通知由 xlink.c 的 `xlink_send_zc()` 统一处理，backend 只需完成写入。|
