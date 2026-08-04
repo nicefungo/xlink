@@ -47,6 +47,9 @@ typedef struct {
     int       is_client;
     int       recon_backoff;   /* current backoff ms, 0 = connected */
 
+    /* Server mode: path of the bound socket, so ipc_close() can unlink it. */
+    char*     server_path;
+
     /* Cached: last client index that had data (for multi-client round-robin) */
     int       last_client;
 
@@ -122,6 +125,20 @@ static inline void ipc_write_u32_be(uint8_t* p, uint32_t v) {
     p[3] = (uint8_t)(v >>  0);
 }
 
+/*
+ * writev() on a socket whose peer has closed raises SIGPIPE, which by
+ * default terminates the process.  That kills the auto-reconnect client
+ * before it can recover.  Use sendmsg(MSG_NOSIGNAL) so a broken pipe
+ * surfaces as EPIPE/ECONNRESET instead of a fatal signal.
+ */
+static ssize_t ipc_sendv(int fd, const struct iovec *iov, int n) {
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = (struct iovec *)iov;
+    msg.msg_iovlen = (size_t)n;
+    return sendmsg(fd, &msg, MSG_NOSIGNAL);
+}
+
 /* Send framed message to all connected clients (server broadcast) */
 static int ipc_send_framed_all(xlink_channel_t *ch, ipc_priv_t *p,
                                 const void *data, size_t len) {
@@ -137,7 +154,7 @@ static int ipc_send_framed_all(xlink_channel_t *ch, ipc_priv_t *p,
             { .iov_base = header, .iov_len = 4 },
             { .iov_base = (void*)data, .iov_len = len }
         };
-        ssize_t w = writev(p->client_fds[i], iov, 2);
+        ssize_t w = ipc_sendv(p->client_fds[i], iov, 2);
         if (w == (ssize_t)(len + 4)) {
             nsent++;
         } else if (w < 0 && (errno == EPIPE || errno == ECONNRESET)) {
@@ -318,6 +335,7 @@ static int ipc_open(xlink_channel_t *ch, const char *addr, const xlink_opt_t *op
         p->listen_fd  = fd;
         p->is_client  = 0;
         p->nclients   = 0;
+        p->server_path = strdup(path);
         ch->fd        = fd;            /* listen fd for xlink_wait */
     } else {
         if (connect(fd, (struct sockaddr*)&sun, sizeof(sun)) < 0) {
@@ -339,6 +357,47 @@ static int ipc_open(xlink_channel_t *ch, const char *addr, const xlink_opt_t *op
     return 0;
 }
 
+/*
+ * Try to reconnect a disconnected IPC client.
+ * Uses exponential backoff: 100ms, 200ms, 400ms... up to 5000ms (mirrors TCP).
+ * Returns 0 on success (ch->fd set), -1 if still disconnected.
+ */
+static int try_reconnect(ipc_priv_t *p, xlink_channel_t *ch) {
+    if (p->recon_backoff == 0)
+        p->recon_backoff = 100;   /* start: 100ms */
+
+    usleep((useconds_t)p->recon_backoff * 1000);
+
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0)
+        goto backoff;
+
+    struct sockaddr_un sun;
+    memset(&sun, 0, sizeof(sun));
+    sun.sun_family = AF_UNIX;
+    strncpy(sun.sun_path, p->recon_path, sizeof(sun.sun_path) - 1);
+
+    if (connect(fd, (struct sockaddr*)&sun, sizeof(sun)) < 0) {
+        close(fd);
+        goto backoff;
+    }
+
+    p->recon_backoff = 0;   /* connected, reset backoff */
+    if (ch->flags & XLINK_NONBLOCK) {
+        int fl = fcntl(fd, F_GETFL, 0);
+        fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    }
+    ch->fd = fd;
+    return 0;
+
+backoff:
+    /* Exponential backoff, cap at 5s */
+    p->recon_backoff *= 2;
+    if (p->recon_backoff > 5000)
+        p->recon_backoff = 5000;
+    return -1;
+}
+
 static void ipc_close(xlink_channel_t *ch) {
     ipc_priv_t *p = (ipc_priv_t*)ch->priv;
     if (!p) return;
@@ -350,6 +409,10 @@ static void ipc_close(xlink_channel_t *ch) {
         for (int i = 0; i < p->nclients; i++)
             close(p->client_fds[i]);
         if (p->listen_fd >= 0) close(p->listen_fd);
+        if (p->server_path) {
+            unlink(p->server_path);   /* don't leave a dangling socket file */
+            free(p->server_path);
+        }
     }
     free(p);
     ch->priv = NULL;
@@ -361,17 +424,36 @@ static int ipc_send(xlink_channel_t *ch, const void *data, size_t len) {
 
     if (p->is_client) {
         /* Need to send with framing: write 4-byte len prefix + payload */
+        if (ch->fd < 0) {
+            /* Disconnected — try reconnect */
+            if (try_reconnect(p, ch) != 0) {
+                snprintf(ch->errbuf, sizeof(ch->errbuf),
+                         "ipc: disconnected (reconnect in %dms)",
+                         p->recon_backoff);
+                return -1;
+            }
+        }
         uint8_t header[4];
         ipc_write_u32_be(header, (uint32_t)len);
         struct iovec iov[2] = {
             { .iov_base = header, .iov_len = 4 },
             { .iov_base = (void*)data, .iov_len = len }
         };
-        ssize_t w = writev(ch->fd, iov, 2);
+        ssize_t w = ipc_sendv(ch->fd, iov, 2);
         if (w == (ssize_t)(len + 4)) return 0;
         if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
             return -1;
         }
+        /* Connection lost — mark for reconnect */
+        int save_errno = errno;
+        close(ch->fd);
+        errno = save_errno;
+        ch->fd = -1;
+        if (p->recon_backoff == 0)
+            p->recon_backoff = 100;
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "ipc: lost connection (%s, will reconnect)",
+                 save_errno ? strerror(save_errno) : "peer closed");
         return -1;
     }
 
@@ -384,7 +466,7 @@ static int ipc_send(xlink_channel_t *ch, const void *data, size_t len) {
             { .iov_base = header, .iov_len = 4 },
             { .iov_base = (void*)data, .iov_len = len }
         };
-        ssize_t w = writev(p->last_recv_fd, iov, 2);
+        ssize_t w = ipc_sendv(p->last_recv_fd, iov, 2);
         return (w == (ssize_t)(len + 4)) ? 0 : -1;
     }
     return ipc_send_framed_all(ch, p, data, len);
@@ -400,6 +482,12 @@ static int ipc_recv(xlink_channel_t *ch, void *buf, size_t *len) {
          * IPC sets use_framing=0, so xlink.c does NOT add framing. */
         uint8_t hdr[4];
         if (ipc_read_exact(ch->fd, hdr, 4) != 4) {
+            close(ch->fd);
+            ch->fd = -1;
+            if (p->recon_backoff == 0)
+                p->recon_backoff = 100;
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "ipc: connection lost (will reconnect)");
             errno = ECONNRESET;
             return -1;
         }
@@ -411,6 +499,12 @@ static int ipc_recv(xlink_channel_t *ch, void *buf, size_t *len) {
             return -1;
         }
         if (ipc_read_exact(ch->fd, buf, msglen) != (ssize_t)msglen) {
+            close(ch->fd);
+            ch->fd = -1;
+            if (p->recon_backoff == 0)
+                p->recon_backoff = 100;
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "ipc: connection lost (will reconnect)");
             errno = ECONNRESET;
             return -1;
         }
@@ -425,8 +519,29 @@ static int ipc_recv(xlink_channel_t *ch, void *buf, size_t *len) {
 static int ipc_write(xlink_channel_t *ch, const void *data, size_t len) {
     ipc_priv_t *p = (ipc_priv_t*)ch->priv;
     if (p->is_client) {
+        if (ch->fd < 0) {
+            if (try_reconnect(p, ch) != 0) {
+                snprintf(ch->errbuf, sizeof(ch->errbuf),
+                         "ipc: disconnected (reconnect in %dms)",
+                         p->recon_backoff);
+                return -1;
+            }
+        }
         ssize_t w = write(ch->fd, data, len);
-        return (w == (ssize_t)len) ? 0 : -1;
+        if (w == (ssize_t)len) return 0;
+        if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return -1;
+        /* Connection lost — mark for reconnect */
+        int save_errno = errno;
+        close(ch->fd);
+        errno = save_errno;
+        ch->fd = -1;
+        if (p->recon_backoff == 0)
+            p->recon_backoff = 100;
+        snprintf(ch->errbuf, sizeof(ch->errbuf),
+                 "ipc: lost connection (%s, will reconnect)",
+                 save_errno ? strerror(save_errno) : "peer closed");
+        return -1;
     }
     return ipc_send_all(p, data, len);
 }
@@ -442,7 +557,16 @@ static int ipc_read(xlink_channel_t *ch, void *buf, size_t len, int timeout_ms) 
         }
         /* IPC always frames: read 4-byte length prefix, then payload */
         uint8_t hdr[4];
-        if (ipc_read_exact(ch->fd, hdr, 4) != 4) { errno = ECONNRESET; return -1; }
+        if (ipc_read_exact(ch->fd, hdr, 4) != 4) {
+            close(ch->fd);
+            ch->fd = -1;
+            if (p->recon_backoff == 0)
+                p->recon_backoff = 100;
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "ipc: connection lost (will reconnect)");
+            errno = ECONNRESET;
+            return -1;
+        }
         uint32_t msglen = ipc_read_u32_be(hdr);
         if (msglen > len) {
             snprintf(ch->errbuf, sizeof(ch->errbuf),
@@ -451,6 +575,12 @@ static int ipc_read(xlink_channel_t *ch, void *buf, size_t len, int timeout_ms) 
             return -1;
         }
         if (ipc_read_exact(ch->fd, buf, msglen) != (ssize_t)msglen) {
+            close(ch->fd);
+            ch->fd = -1;
+            if (p->recon_backoff == 0)
+                p->recon_backoff = 100;
+            snprintf(ch->errbuf, sizeof(ch->errbuf),
+                     "ipc: connection lost (will reconnect)");
             errno = ECONNRESET;
             return -1;
         }

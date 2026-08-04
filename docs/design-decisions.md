@@ -111,6 +111,33 @@ permanent failures.
 - Callers wanting explicit error handling can check the number of consecutive
   failures via `ch->errbuf` and implement their own timeout.
 
+### 5a. IPC (AF_UNIX) Auto-Reconnect — Mirrors TCP + SIGPIPE Safety
+
+**Where**: `src/ipc_backend.c` — `try_reconnect()` / `ipc_send()` / `ipc_recv()`
+
+**What**: The IPC client backend now mirrors TCP's auto-reconnect. On a broken
+AF_UNIX connection (`EPIPE`/`ECONNRESET`), the dead fd is closed and marked
+`-1`; the next `send`/`recv` calls `try_reconnect()` with the same exponential
+backoff (100ms → 200ms → ... → 5s cap). This lets a client survive a server
+restart on the same socket path.
+
+**SIGPIPE — why `ipc_sendv()` uses `sendmsg(MSG_NOSIGNAL)`**:
+A bare `writev()` to a socket whose peer has closed raises **SIGPIPE**, whose
+default action terminates the process. That silently killed the auto-reconnect
+client on its very first reconnect attempt before it could recover. By routing
+all IPC sends through `ipc_sendv()` (`sendmsg(..., MSG_NOSIGNAL)`), a broken
+pipe surfaces as `EPIPE`/`ECONNRESET` instead of a fatal signal, so the
+reconnect loop can run.
+
+**Cross-platform note**: `MSG_NOSIGNAL` is Linux-specific. On other platforms
+(Windows, BSD), use `SO_NOSIGPIPE` or ignore `SIGPIPE` — see
+`future-plans/05-multi-platform.md`.
+
+**Server socket cleanup**: `ipc_close()` (server side) now `unlink()`s the bound
+socket path, so a clean shutdown does not leave a dangling socket file. The
+server's `ipc_open()` also unlinks before `bind()`, so a restart always rebinds
+cleanly.
+
 ---
 
 ## 6. Single Header File (xlink.h) — No Internal Headers Exposed

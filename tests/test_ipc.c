@@ -357,6 +357,72 @@ static void test_peek_after_send(void) {
     unlink(SOCK_PATH);
 }
 
+/* ─── Test 9: client auto-reconnect after server restart ── */
+
+static void test_auto_reconnect(void) {
+    fprintf(stderr, "\n--- client auto-reconnect ---\n");
+    unlink(SOCK_PATH);
+
+    /* Spawn a server that echoes one message then exits. */
+    pid_t srv1 = fork();
+    if (srv1 == 0) {
+        xlink_channel_t *srv = xlink_open(XLINK_IPC, SOCK_PATH,
+                                          &(xlink_opt_t){.flags = XLINK_CREATE | XLINK_SERVER});
+        if (!srv) exit(1);
+        char buf[32]; size_t len = sizeof(buf);
+        if (xlink_recv(srv, buf, &len) != 0) exit(1);
+        xlink_send(srv, buf, len);
+        xlink_close(srv);
+        exit(0);
+    }
+    usleep(300000);
+
+    xlink_channel_t *cli = xlink_open(XLINK_IPC, SOCK_PATH, NULL);
+    CHK(cli != NULL, "client open");
+
+    /* First round-trip */
+    CHK(xlink_send(cli, "hello", 5) == 0, "send first msg");
+    xlink_channel_t *chans[] = { cli };
+    CHK(xlink_wait(chans, 1, 3000) == 0, "wait first reply");
+    char buf[32]; size_t len = sizeof(buf);
+    CHK(xlink_recv(cli, buf, &len) == 0, "recv first reply");
+    CHK(len == 5 && memcmp(buf, "hello", 5) == 0, "first echo matches");
+
+    /* Server 1 exits → socket lost. */
+    int st; waitpid(srv1, &st, 0);
+
+    /* Spawn a fresh server on the same path (restart). */
+    pid_t srv2 = fork();
+    if (srv2 == 0) {
+        xlink_channel_t *srv = xlink_open(XLINK_IPC, SOCK_PATH,
+                                          &(xlink_opt_t){.flags = XLINK_CREATE | XLINK_SERVER});
+        if (!srv) exit(1);
+        char b[32]; size_t l = sizeof(b);
+        if (xlink_recv(srv, b, &l) != 0) exit(1);
+        xlink_send(srv, b, l);
+        xlink_close(srv);
+        exit(0);
+    }
+    usleep(300000);
+
+    /* Client send on dead socket → should auto-reconnect and deliver. */
+    int sent = 0;
+    for (int i = 0; i < 10 && !sent; i++) {
+        if (xlink_send(cli, "again", 5) == 0) { sent = 1; break; }
+        usleep(200000);
+    }
+    CHK(sent, "client auto-reconnected on send");
+
+    CHK(xlink_wait(chans, 1, 3000) == 0, "wait reconnect reply");
+    len = sizeof(buf);
+    CHK(xlink_recv(cli, buf, &len) == 0, "recv reconnect reply");
+    CHK(len == 5 && memcmp(buf, "again", 5) == 0, "reconnect echo matches");
+
+    xlink_close(cli);
+    waitpid(srv2, &st, 0);
+    unlink(SOCK_PATH);
+}
+
 /* ─── main ────────────────────────────────────────────── */
 
 int main(void) {
@@ -370,6 +436,7 @@ int main(void) {
     test_no_socket();
     test_large_msg();
     test_peek_after_send();
+    test_auto_reconnect();
 
     fprintf(stderr, "\n=== RESULTS: %d/%d PASS ===\n", checks - failed, checks);
     return failed ? 1 : 0;
