@@ -29,7 +29,7 @@ int main(void) {
     /* 1. zc_capable on SHM channel */
     {
         xlink_channel_t *ch = xlink_open(XLINK_SHM, "zc_test_ch",
-                                         &(xlink_opt_t){XLINK_CREATE | XLINK_SPSC});
+                                         &(xlink_opt_t){.flags = XLINK_CREATE | XLINK_SPSC});
         T_ASSERT(ch != NULL, "open SHM SPSC channel");
 
         int cap = xlink_zc_capable(ch);
@@ -41,7 +41,7 @@ int main(void) {
     /* 2. zc_capable on non-SHM channel returns 0 */
     {
         xlink_channel_t *ch = xlink_open(XLINK_PIPE, "/tmp/zc_test_pipe",
-                                         &(xlink_opt_t){XLINK_CREATE});
+                                         &(xlink_opt_t){.flags = XLINK_CREATE});
         T_ASSERT(ch != NULL, "open pipe channel");
 
         int cap = xlink_zc_capable(ch);
@@ -54,7 +54,7 @@ int main(void) {
     /* 3. send_zc + recv_zc basic round-trip (fork, SPSC mode) */
     {
         xlink_channel_t *tx = xlink_open(XLINK_SHM, "zc_rtt",
-                                         &(xlink_opt_t){XLINK_CREATE | XLINK_SPSC});
+                                         &(xlink_opt_t){.flags = XLINK_CREATE | XLINK_SPSC});
         T_ASSERT(tx != NULL, "open SHM SPSC tx for round-trip");
 
         pid_t pid = fork();
@@ -109,7 +109,7 @@ int main(void) {
     /* 4. send_zc completion callback */
     {
         xlink_channel_t *tx = xlink_open(XLINK_SHM, "zc_cb",
-                                         &(xlink_opt_t){XLINK_CREATE | XLINK_SPSC});
+                                         &(xlink_opt_t){.flags = XLINK_CREATE | XLINK_SPSC});
         T_ASSERT(tx != NULL, "open SHM for callback test");
 
         char msg[] = "callback test";
@@ -135,7 +135,7 @@ int main(void) {
     /* 5. zc_poll with no pending should return 0 */
     {
         xlink_channel_t *tx = xlink_open(XLINK_SHM, "zc_nopend",
-                                         &(xlink_opt_t){XLINK_CREATE | XLINK_SPSC});
+                                         &(xlink_opt_t){.flags = XLINK_CREATE | XLINK_SPSC});
         T_ASSERT(tx != NULL, "open SHM for no-pending poll");
 
         int n = xlink_zc_poll(tx);
@@ -147,7 +147,7 @@ int main(void) {
     /* 6. send_zc + recv_zc multi-message round-trip */
     {
         xlink_channel_t *tx = xlink_open(XLINK_SHM, "zc_multi",
-                                         &(xlink_opt_t){XLINK_CREATE | XLINK_SPSC});
+                                         &(xlink_opt_t){.flags = XLINK_CREATE | XLINK_SPSC});
         T_ASSERT(tx != NULL, "open SHM SPSC tx for multi");
 
         pid_t pid = fork();
@@ -212,7 +212,7 @@ int main(void) {
     /* 7. send_zc with NULL/empty checks */
     {
         xlink_channel_t *tx = xlink_open(XLINK_SHM, "zc_edge",
-                                         &(xlink_opt_t){XLINK_CREATE | XLINK_SPSC});
+                                         &(xlink_opt_t){.flags = XLINK_CREATE | XLINK_SPSC});
         T_ASSERT(tx != NULL, "open SHM for edge cases");
 
         int rc = xlink_send_zc(NULL, NULL, NULL, NULL);
@@ -234,7 +234,7 @@ int main(void) {
     /* 8. recv_zc with no data returns error */
     {
         xlink_channel_t *ch = xlink_open(XLINK_SHM, "zc_empty",
-                                         &(xlink_opt_t){XLINK_CREATE | XLINK_SPSC});
+                                         &(xlink_opt_t){.flags = XLINK_CREATE | XLINK_SPSC});
         T_ASSERT(ch != NULL, "open SHM for empty recv_zc test");
 
         /* No data has been sent — recv_zc should return -1 */

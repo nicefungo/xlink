@@ -170,7 +170,7 @@ static void test_spsc_shm_pipeline(void)
     {
         char cmd[256];
         snprintf(cmd, sizeof(cmd), "rm -f /dev/shm/%s /tmp/xlink-evt-%s 2>/dev/null", name, name);
-        system(cmd);
+        int rc = system(cmd); (void)rc;
     }
     PASS();
 }
@@ -269,7 +269,7 @@ static void test_mpsc_shm_pipeline(void)
     {
         char cmd[256];
         snprintf(cmd, sizeof(cmd), "rm -f /dev/shm/%s /tmp/xlink-evt-%s 2>/dev/null", name, name);
-        system(cmd);
+        int rc = system(cmd); (void)rc;
     }
     PASS();
 }
