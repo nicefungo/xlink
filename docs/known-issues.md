@@ -2,7 +2,7 @@
 
 ## 1. xlink_read() timeout on SHM
 
-**Status**: ✅ Fixed (2026-05-28). All 6 backends now implement `.read` vtable.
+**Status**: ✅ Fixed (2026-05-28). All backends now implement `.read` vtable.
 
 **Fix**: SHM backend implements `.read` via a `shm_peek()` polling loop with
 500µs intervals, using `clock_gettime(CLOCK_MONOTONIC)` for timeout accuracy.
